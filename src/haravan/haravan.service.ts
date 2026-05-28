@@ -664,6 +664,17 @@ export class HaravanService {
     );
   }
 
+  private async clearShopOrgIndex(domains: string[]): Promise<void> {
+    const uniqueDomains = [...new Set(domains.map(normalizeShopDomain))].filter(
+      Boolean,
+    );
+    await Promise.all(
+      uniqueDomains.map((domain) =>
+        this.redisService.del(`${SHOP_DOMAIN_PREFIX}:${domain}`),
+      ),
+    );
+  }
+
   private async resolveOrgidFromShop(
     shop: string | null,
   ): Promise<string | null> {
@@ -1539,12 +1550,14 @@ export class HaravanService {
     ).trim();
     if (!webhookUrl || !this.shouldAutoSubscribeWebhook()) return;
 
+    const topics = ['app_subscriptions/update', 'app/uninstalled', 'shop/update'];
+
     try {
       await axios.post(
         'https://webhook.haravan.com/api/subscribe',
         {
           webhook_url: webhookUrl,
-          topics: ['app_subscriptions/update'],
+          topics,
         },
         {
           headers: { Authorization: `Bearer ${accessToken}` },
@@ -1556,20 +1569,22 @@ export class HaravanService {
         `Webhook subscribe endpoint failed, trying legacy endpoint: ${getErrorMessage(error)}`,
       );
       try {
-        await axios.post(
-          'https://apis.haravan.com/com/webhooks.json',
-          {
-            webhook: {
-              topic: 'app_subscriptions/update',
-              address: webhookUrl,
-              format: 'json',
+        for (const topic of topics) {
+          await axios.post(
+            'https://apis.haravan.com/com/webhooks.json',
+            {
+              webhook: {
+                topic,
+                address: webhookUrl,
+                format: 'json',
+              },
             },
-          },
-          {
-            headers: { Authorization: `Bearer ${accessToken}` },
-            timeout: 8000,
-          },
-        );
+            {
+              headers: { Authorization: `Bearer ${accessToken}` },
+              timeout: 8000,
+            },
+          );
+        }
       } catch (legacyError) {
         this.logger.warn(
           `Webhook subscribe skipped: ${getErrorMessage(legacyError)}`,
@@ -1600,7 +1615,25 @@ export class HaravanService {
       throw new UnauthorizedException('Invalid webhook hmac');
     }
 
-    if (topic.toLowerCase() !== 'app_subscriptions/update') {
+    const normalizedTopic = topic.toLowerCase().trim();
+
+    if (
+      ['app/uninstalled', 'app_uninstalled', 'app uninstall'].includes(
+        normalizedTopic,
+      )
+    ) {
+      return this.handleAppUninstalledWebhook(req, topic);
+    }
+
+    if (
+      ['shop/update', 'shops/update', 'shop_update', 'shops_update'].includes(
+        normalizedTopic,
+      )
+    ) {
+      return this.handleShopUpdatedWebhook(req, topic);
+    }
+
+    if (normalizedTopic !== 'app_subscriptions/update') {
       await this.db?.recordWebhook({
         topic: topic || 'unknown',
         payload: req.body,
@@ -1611,6 +1644,107 @@ export class HaravanService {
     }
 
     return this.syncSubscriptionFromWebhook(req, topic);
+  }
+
+  private async handleAppUninstalledWebhook(
+    req: RawBodyRequest,
+    topic: string,
+  ): Promise<Record<string, unknown>> {
+    const body =
+      typeof req.body === 'object' && req.body !== null
+        ? (req.body as Record<string, unknown>)
+        : {};
+    const orgid = await this.resolveWebhookOrgid(req, body, body);
+    if (!orgid) throw new BadRequestException('Missing orgid');
+
+    const appData = await this.getInstallSession(orgid);
+    if (appData) {
+      await this.clearShopOrgIndex(getInstallShopDomains(appData));
+      const updated: RedisInstallData = {
+        ...appData,
+        status: 'uninstalled',
+        haravan_token_status: 'uninstalled',
+        access_token: undefined,
+        refresh_token: undefined,
+      };
+      await this.saveInstallSession(orgid, updated);
+    }
+    await this.storeService.deactivateStore(orgid);
+    await this.redisService.del(this.subscriptionKey(orgid));
+
+    await this.notificationService?.notify('APP_UNINSTALLED', { orgid });
+    await this.db?.recordWebhook({
+      topic,
+      orgid,
+      payload: body,
+      headers: this.pickWebhookHeaders(req),
+      status: 'processed',
+    });
+    this.logger.log(`App uninstall handled for orgid=${orgid}`);
+    return { ok: true, topic, orgid, uninstalled: true };
+  }
+
+  private async handleShopUpdatedWebhook(
+    req: RawBodyRequest,
+    topic: string,
+  ): Promise<Record<string, unknown>> {
+    const body =
+      typeof req.body === 'object' && req.body !== null
+        ? (req.body as Record<string, unknown>)
+        : {};
+    const orgid = await this.resolveWebhookOrgid(req, body, body);
+    if (!orgid) throw new BadRequestException('Missing orgid');
+
+    const appData = await this.getInstallSession(orgid);
+    if (!appData) throw new BadRequestException('Install session not found');
+
+    const shopPayload =
+      typeof body.shop === 'object' && body.shop !== null
+        ? (body.shop as Record<string, unknown>)
+        : body;
+    const currentDomains = getInstallShopDomains(appData);
+    const candidateDomains = [
+      asString(shopPayload.domain),
+      asString(shopPayload.primary_domain),
+      asString(shopPayload.myharavan_domain),
+      asString(shopPayload.shop_domain),
+      asString(body.domain),
+      asString(body.primary_domain),
+      asString(body.myharavan_domain),
+      asString(body.shop_domain),
+      ...currentDomains,
+    ].filter(Boolean) as string[];
+
+    const normalizedDomains = [...new Set(candidateDomains.map(normalizeShopDomain))].filter(Boolean);
+    appData.domain = asString(shopPayload.domain) || asString(body.domain) || appData.domain;
+    appData.primary_domain =
+      asString(shopPayload.primary_domain) ||
+      asString(body.primary_domain) ||
+      appData.primary_domain;
+    appData.myharavan_domain =
+      asString(shopPayload.myharavan_domain) ||
+      asString(body.myharavan_domain) ||
+      asString(shopPayload.shop_domain) ||
+      asString(body.shop_domain) ||
+      appData.myharavan_domain;
+
+    await this.saveInstallSession(orgid, appData);
+    await this.syncStoreFromInstallData(orgid, appData);
+    await this.saveShopOrgIndex(orgid, normalizedDomains);
+
+    await this.notificationService?.notify('SHOP_UPDATED', {
+      orgid,
+      domains: normalizedDomains,
+    });
+    await this.db?.recordWebhook({
+      topic,
+      orgid,
+      payload: body,
+      headers: this.pickWebhookHeaders(req),
+      status: 'processed',
+    });
+    this.logger.log(`Shop update handled for orgid=${orgid}`);
+    return { ok: true, topic, orgid, domains: normalizedDomains };
   }
 
   private verifyWebhookHmac(req: RawBodyRequest): boolean {

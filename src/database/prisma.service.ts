@@ -596,6 +596,23 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  async markShopInactive(orgid: string): Promise<void> {
+    if (!this.prisma) return;
+    try {
+      await this.prisma.shop.update({
+        where: { orgid },
+        data: {
+          isActive: false,
+          status: 'uninstalled',
+        },
+      });
+    } catch (error) {
+      this.logger.warn(
+        `DB shop deactivate skipped: ${this.getErrorMessage(error)}`,
+      );
+    }
+  }
+
   async recordLookupEvent(input: LookupAuditInput): Promise<void> {
     if (!this.prisma) return;
     try {

@@ -365,6 +365,33 @@ export class StoreService {
     return this.redis.has(`${DOMAIN_INDEX_PREFIX}:${normalized}`);
   }
 
+  async deactivateStore(orgId: string): Promise<void> {
+    const existing = await this.getStoreByOrgId(orgId);
+    if (!existing) return;
+
+    const domains = [
+      existing.shop_domain,
+      existing.custom_domain,
+      ...(existing.shop_domains || []),
+    ]
+      .filter((domain): domain is string => Boolean(domain))
+      .map((domain) => this.normalizeDomain(domain));
+
+    const updated: StoreRecord = {
+      ...existing,
+      is_active: false,
+      status: 'uninstalled',
+    };
+
+    await this.redis.set(`${STORE_PREFIX}:${orgId}`, updated);
+    await Promise.all(
+      [...new Set(domains)].map((domain) =>
+        this.redis.del(`${DOMAIN_INDEX_PREFIX}:${domain}`),
+      ),
+    );
+    await this.db?.markShopInactive(orgId);
+  }
+
   // ─── Settings ───
 
   async getSettings(orgId: string): Promise<StoreSettings> {
