@@ -38,5 +38,14 @@ jobs:
 
             APP_PORT=$(grep '^PORT=' .env | tail -n 1 | cut -d '=' -f2 | tr -d '\r')
             if [ -z "$APP_PORT" ]; then APP_PORT=3333; fi
-            curl -fsS "http://127.0.0.1:${APP_PORT}/api/health"
+            for i in $(seq 1 20); do
+              if curl -fsS "http://127.0.0.1:${APP_PORT}/api/health" >/tmp/checkorders-health.json; then
+                cat /tmp/checkorders-health.json
+                exit 0
+              fi
+              sleep 2
+            done
+
+            pm2 logs haravan-checkorders --lines 100 --nostream || true
+            exit 1
           EOF
