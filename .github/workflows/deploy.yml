@@ -22,6 +22,7 @@ jobs:
       - name: Deploy to VPS
         run: |
           ssh -o StrictHostKeyChecking=no ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} << 'EOF'
+            set -euo pipefail
             cd ${{ secrets.APP_DIR }}
             git fetch origin main
             git checkout main
