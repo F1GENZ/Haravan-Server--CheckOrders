@@ -5,6 +5,7 @@ import type {
   LookupMethod,
   VisibleField,
   WidgetDisplayMode,
+  WidgetTriggerAction,
 } from '../dto/store-settings.dto';
 
 // ─── Types ───
@@ -25,6 +26,8 @@ export interface StoreRecord {
 export interface StoreSettings {
   widget_enabled: boolean;
   widget_display_mode: WidgetDisplayMode;
+  widget_trigger_action: WidgetTriggerAction;
+  widget_trigger_link_url: string;
   lookup_method: LookupMethod;
   visible_fields: VisibleField[];
   max_orders: number;
@@ -70,6 +73,8 @@ const DEFAULT_WIDGET_TEXTS: Record<string, string> = {
 const DEFAULT_SETTINGS: StoreSettings = {
   widget_enabled: true,
   widget_display_mode: 'inline',
+  widget_trigger_action: 'modal',
+  widget_trigger_link_url: '',
   lookup_method: 'phone_and_code',
   visible_fields: [
     'order_number',
@@ -388,8 +393,18 @@ export class StoreService {
       .branded_links;
     merged.widget_texts = this.sanitizeWidgetTexts(merged.widget_texts);
     merged.rebuy_enabled = merged.rebuy_enabled !== false;
-    merged.widget_display_mode =
-      merged.widget_display_mode === 'popup' ? 'popup' : 'inline';
+    merged.widget_display_mode = ['popup', 'trigger'].includes(
+      String(merged.widget_display_mode),
+    )
+      ? (merged.widget_display_mode as WidgetDisplayMode)
+      : 'inline';
+    merged.widget_trigger_action =
+      merged.widget_trigger_action === 'link' ? 'link' : 'modal';
+    merged.widget_trigger_link_url = String(
+      merged.widget_trigger_link_url || '',
+    )
+      .trim()
+      .slice(0, 500);
 
     // One-time migration for existing stores
     let needsSave = false;
@@ -418,7 +433,16 @@ export class StoreService {
     }
     if (typeof durableSettings.rebuy_enabled !== 'boolean') needsSave = true;
     if (
-      !['inline', 'popup'].includes(String(durableSettings.widget_display_mode))
+      !['inline', 'popup', 'trigger'].includes(
+        String(durableSettings.widget_display_mode),
+      )
+    ) {
+      needsSave = true;
+    }
+    if (
+      !['modal', 'link'].includes(
+        String((durableSettings as Partial<StoreSettings>).widget_trigger_action),
+      )
     ) {
       needsSave = true;
     }
@@ -452,7 +476,19 @@ export class StoreService {
           ? current.widget_display_mode
           : partial.widget_display_mode === 'popup'
             ? 'popup'
-            : 'inline',
+            : partial.widget_display_mode === 'trigger'
+              ? 'trigger'
+              : 'inline',
+      widget_trigger_action:
+        partial.widget_trigger_action === undefined
+          ? current.widget_trigger_action
+          : partial.widget_trigger_action === 'link'
+            ? 'link'
+            : 'modal',
+      widget_trigger_link_url:
+        partial.widget_trigger_link_url === undefined
+          ? current.widget_trigger_link_url
+          : String(partial.widget_trigger_link_url || '').trim().slice(0, 500),
     };
     delete (updated as StoreSettings & { branded_links?: unknown })
       .branded_links;

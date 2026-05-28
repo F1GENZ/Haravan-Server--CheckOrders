@@ -32,8 +32,11 @@ export const VISIBLE_FIELD_OPTIONS = [
 ] as const;
 export type VisibleField = (typeof VISIBLE_FIELD_OPTIONS)[number];
 
-export const WIDGET_DISPLAY_MODES = ['inline', 'popup'] as const;
+export const WIDGET_DISPLAY_MODES = ['inline', 'popup', 'trigger'] as const;
 export type WidgetDisplayMode = (typeof WIDGET_DISPLAY_MODES)[number];
+
+export const WIDGET_TRIGGER_ACTIONS = ['modal', 'link'] as const;
+export type WidgetTriggerAction = (typeof WIDGET_TRIGGER_ACTIONS)[number];
 
 export class UpdateStoreSettingsDto {
   @IsOptional()
@@ -86,4 +89,13 @@ export class UpdateStoreSettingsDto {
   @IsOptional()
   @IsBoolean()
   rebuy_enabled?: boolean;
+
+  @IsOptional()
+  @IsString()
+  @IsIn(WIDGET_TRIGGER_ACTIONS)
+  widget_trigger_action?: WidgetTriggerAction;
+
+  @IsOptional()
+  @IsString()
+  widget_trigger_link_url?: string;
 }

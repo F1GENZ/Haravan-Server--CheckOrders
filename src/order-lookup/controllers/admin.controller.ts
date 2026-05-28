@@ -167,6 +167,8 @@ export class AdminController {
         widget: {
           enabled: settings.widget_enabled !== false,
           display_mode: settings.widget_display_mode || 'inline',
+          trigger_action: settings.widget_trigger_action || 'modal',
+          trigger_link_url: settings.widget_trigger_link_url || '',
           lookup_method: settings.lookup_method,
           max_orders: settings.max_orders,
           inline_url: widgetUrl,
@@ -203,6 +205,7 @@ export class AdminController {
 
     const store = await this.storeService.getStoreByOrgId(orgId);
     if (!store) throw new BadRequestException('Store not found');
+    const settings = await this.storeService.getSettings(orgId);
 
     const widgetPath = path.join(
       __dirname,
@@ -240,6 +243,12 @@ export class AdminController {
 <body>
 <script>window.__f1gConfig=${JSON.stringify({
       preview_enabled: true,
+      widget_display_mode:
+        settings.widget_display_mode === 'trigger'
+          ? 'popup'
+          : settings.widget_display_mode || 'inline',
+      widget_trigger_action: settings.widget_trigger_action || 'modal',
+      widget_trigger_link_url: settings.widget_trigger_link_url || '',
       public_shop: publicShopIdentifier(store),
     })};</script>
 ${html}

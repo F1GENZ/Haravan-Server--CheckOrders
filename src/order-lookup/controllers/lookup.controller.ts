@@ -134,16 +134,27 @@ export class LookupController {
       res.status(404).type('application/javascript').send('');
       return;
     }
+    const settings = await this.storeService.getSettings(store.org_id);
 
     const publicShop = publicShopIdentifier(store);
     const widgetPath = `/api/order/widget/shop/${encodeURIComponent(publicShop)}`;
     const frameId = `f1g-order-lookup-${publicShop.replace(/[^a-zA-Z0-9_-]/g, '') || 'widget'}`;
+    const widgetUrl = `${widgetApiUrl()}${widgetPath}`;
+    const displayMode =
+      settings.widget_display_mode === 'trigger' ? 'trigger' : 'popup';
+    const triggerAction =
+      settings.widget_trigger_action === 'link' ? 'link' : 'modal';
+    const triggerLinkUrl = String(settings.widget_trigger_link_url || '').trim();
 
     const js = `
 (function () {
   var frameId = ${JSON.stringify(frameId)};
   var script = document.currentScript;
   var src = new URL(${JSON.stringify(widgetPath)}, script ? script.src : window.location.href).href;
+  var widgetUrl = ${JSON.stringify(widgetUrl)};
+  var displayMode = ${JSON.stringify(displayMode)};
+  var triggerAction = ${JSON.stringify(triggerAction)};
+  var triggerLinkUrl = ${JSON.stringify(triggerLinkUrl)};
   if (document.getElementById(frameId)) return;
 
   var frame = document.createElement("iframe");
@@ -151,7 +162,7 @@ export class LookupController {
   frame.src = src;
   frame.title = "Tra cứu đơn hàng";
   frame.loading = "lazy";
-  frame.style.cssText = "position:fixed;right:20px;bottom:20px;width:220px;height:76px;border:0;z-index:2147483647;background:transparent;";
+  frame.style.cssText = "position:fixed;right:20px;bottom:20px;width:252px;height:96px;border:0;z-index:2147483647;background:transparent;";
   document.body.appendChild(frame);
 
   var widgetOrigin;
@@ -171,6 +182,8 @@ export class LookupController {
     frame.style.zIndex = "2147483647";
     frame.style.background = "transparent";
     if (open) {
+      frame.style.display = "block";
+      frame.style.pointerEvents = "auto";
       frame.style.left = "0";
       frame.style.top = "0";
       frame.style.right = "0";
@@ -178,12 +191,68 @@ export class LookupController {
       frame.style.width = "100vw";
       frame.style.height = "100vh";
     } else {
-      frame.style.left = "auto";
-      frame.style.top = "auto";
-      frame.style.right = "20px";
-      frame.style.bottom = "20px";
-      frame.style.width = "220px";
-      frame.style.height = "76px";
+      if (displayMode === "trigger") {
+        frame.style.display = "none";
+        frame.style.pointerEvents = "none";
+        frame.style.left = "auto";
+        frame.style.top = "auto";
+        frame.style.right = "0";
+        frame.style.bottom = "0";
+        frame.style.width = "1px";
+        frame.style.height = "1px";
+      } else {
+        frame.style.display = "block";
+        frame.style.pointerEvents = "auto";
+        frame.style.left = "auto";
+        frame.style.top = "auto";
+        frame.style.right = "20px";
+        frame.style.bottom = "20px";
+        frame.style.width = "252px";
+        frame.style.height = "96px";
+      }
+    }
+  }
+
+  function openWidget(evt) {
+    if (evt && evt.preventDefault) evt.preventDefault();
+    if (displayMode !== "trigger") return;
+    if (triggerAction === "link") {
+      window.location.href = triggerLinkUrl || widgetUrl;
+      return;
+    }
+    setPopupFrame(true);
+    postBack(frame.contentWindow, widgetOrigin, { type: "f1g_widget_trigger_open" });
+  }
+
+  function bindTriggerButtons(root) {
+    var selector = "[data-f1g-checkorders-open]";
+    var els = (root || document).querySelectorAll(selector);
+    els.forEach(function (el) {
+      if (el.__f1gBound) return;
+      var target = (el.getAttribute("data-f1g-checkorders-open") || "").trim();
+      if (target && target !== ${JSON.stringify(publicShop)}) return;
+      el.__f1gBound = true;
+      el.addEventListener("click", openWidget);
+    });
+  }
+
+  window.F1GENZCheckOrders = window.F1GENZCheckOrders || {};
+  window.F1GENZCheckOrders[${JSON.stringify(publicShop)}] = {
+    open: function () { openWidget(); },
+    close: function () {
+      if (displayMode === "trigger") {
+        setPopupFrame(false);
+        postBack(frame.contentWindow, widgetOrigin, { type: "f1g_widget_trigger_close" });
+      }
+    },
+    url: widgetUrl
+  };
+
+  if (displayMode === "trigger") {
+    setPopupFrame(false);
+    bindTriggerButtons(document);
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", function () { bindTriggerButtons(document); }, { once: true });
     }
   }
 
@@ -340,6 +409,8 @@ export class LookupController {
       max_orders: settings.max_orders || 5,
       widget_enabled: settings.widget_enabled !== false,
       widget_display_mode: settings.widget_display_mode || 'inline',
+      widget_trigger_action: settings.widget_trigger_action || 'modal',
+      widget_trigger_link_url: settings.widget_trigger_link_url || '',
       theme_color: settings.theme_color || '#4361ee',
       widget_texts: settings.widget_texts || {},
       rebuy_enabled: settings.rebuy_enabled !== false,

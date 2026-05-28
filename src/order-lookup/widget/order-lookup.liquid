@@ -116,7 +116,8 @@
   .f1g-ot__popup-close {
     display: none;
   }
-  .f1g-ot--popup {
+  .f1g-ot--popup,
+  .f1g-ot--trigger {
     max-width: none;
     margin: 0;
     width: auto;
@@ -151,23 +152,30 @@
   .f1g-ot--popup .f1g-ot__popup-btn:hover {
     background: var(--f1g-primary-dark);
   }
-  .f1g-ot--popup .f1g-ot__popup-backdrop {
+  .f1g-ot--trigger .f1g-ot__popup-btn {
+    display: none;
+  }
+  .f1g-ot--popup .f1g-ot__popup-backdrop,
+  .f1g-ot--trigger .f1g-ot__popup-backdrop {
     position: fixed;
     inset: 0;
     z-index: 2147483644;
     background: rgba(15, 23, 42, 0.38);
     backdrop-filter: blur(2px);
   }
-  .f1g-ot--popup .f1g-ot__wrap {
+  .f1g-ot--popup .f1g-ot__wrap,
+  .f1g-ot--trigger .f1g-ot__wrap {
     display: none;
   }
   .f1g-ot--popup.f1g-ot--popup-open .f1g-ot__popup-btn {
     display: none;
   }
-  .f1g-ot--popup.f1g-ot--popup-open .f1g-ot__popup-backdrop {
+  .f1g-ot--popup.f1g-ot--popup-open .f1g-ot__popup-backdrop,
+  .f1g-ot--trigger.f1g-ot--popup-open .f1g-ot__popup-backdrop {
     display: block;
   }
-  .f1g-ot--popup.f1g-ot--popup-open .f1g-ot__wrap {
+  .f1g-ot--popup.f1g-ot--popup-open .f1g-ot__wrap,
+  .f1g-ot--trigger.f1g-ot--popup-open .f1g-ot__wrap {
     position: fixed;
     right: 20px;
     bottom: 20px;
@@ -178,7 +186,8 @@
     min-height: 560px;
     background: var(--f1g-card);
   }
-  .f1g-ot--popup.f1g-ot--popup-open .f1g-ot__popup-close {
+  .f1g-ot--popup.f1g-ot--popup-open .f1g-ot__popup-close,
+  .f1g-ot--trigger.f1g-ot--popup-open .f1g-ot__popup-close {
     position: absolute;
     top: 10px;
     right: 10px;
@@ -197,7 +206,8 @@
     cursor: pointer;
     box-shadow: 0 2px 8px rgba(15, 23, 42, 0.1);
   }
-  .f1g-ot--popup.f1g-ot--popup-open .f1g-ot__popup-close:hover {
+  .f1g-ot--popup.f1g-ot--popup-open .f1g-ot__popup-close:hover,
+  .f1g-ot--trigger.f1g-ot--popup-open .f1g-ot__popup-close:hover {
     color: var(--f1g-primary);
     border-color: var(--f1g-primary);
   }
@@ -690,7 +700,8 @@
       height: 54px;
       font-size: 0.84rem;
     }
-    .f1g-ot--popup.f1g-ot--popup-open .f1g-ot__wrap {
+    .f1g-ot--popup.f1g-ot--popup-open .f1g-ot__wrap,
+    .f1g-ot--trigger.f1g-ot--popup-open .f1g-ot__wrap {
       inset: 0;
       width: 100vw;
       max-height: 100vh;
@@ -996,7 +1007,7 @@
     }
 
     function setPopupOpen(open) {
-      if (displayMode !== 'popup') return;
+      if (displayMode !== 'popup' && displayMode !== 'trigger') return;
       root.classList.toggle('f1g-ot--popup-open', open);
       if (popupBtn) popupBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
       postPopupState(open);
@@ -1008,10 +1019,12 @@
     }
 
     function applyDisplayMode(mode) {
-      displayMode = mode === 'popup' ? 'popup' : 'inline';
+      displayMode = mode === 'popup' ? 'popup' : mode === 'trigger' ? 'trigger' : 'inline';
       var isPopup = displayMode === 'popup';
+      var isTrigger = displayMode === 'trigger';
       root.classList.toggle('f1g-ot--popup', isPopup);
-      if (isPopup) {
+      root.classList.toggle('f1g-ot--trigger', isTrigger);
+      if (isPopup || isTrigger) {
         setPopupOpen(false);
       } else {
         root.classList.remove('f1g-ot--popup-open');
@@ -1051,6 +1064,15 @@
         setPopupOpen(false);
       });
     }
+    window.addEventListener('message', function (e) {
+      var data = e.data || {};
+      if (data.type === 'f1g_widget_trigger_open') {
+        setPopupOpen(true);
+      }
+      if (data.type === 'f1g_widget_trigger_close') {
+        setPopupOpen(false);
+      }
+    });
     document.addEventListener('keydown', function (e) {
       if (e.key === 'Escape') setPopupOpen(false);
     });
