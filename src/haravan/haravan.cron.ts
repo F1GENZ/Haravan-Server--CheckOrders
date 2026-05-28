@@ -39,7 +39,7 @@ export class HaravanCronService {
     let appEntries: Array<{ key: string; appData: AppInstallData | null }> = [];
     try {
       const keys = await this.redisService.scanKeys(
-        'haravan:checkorder:app_install:*',
+        'haravan:checkorders:app_install:*',
       );
       appEntries = await Promise.all(
         keys.map(async (key) => ({
@@ -60,7 +60,7 @@ export class HaravanCronService {
       );
       appEntries.push(
         ...missingDurableEntries.map((appData) => ({
-          key: `haravan:checkorder:app_install:${appData.orgid}`,
+          key: `haravan:checkorders:app_install:${appData.orgid}`,
           appData,
         })),
       );

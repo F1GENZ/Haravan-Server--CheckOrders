@@ -36,9 +36,9 @@ export interface StoreSettings {
   rebuy_enabled: boolean;
 }
 
-const STORE_PREFIX = 'haravan:checkorder:store';
-const SETTINGS_PREFIX = 'haravan:checkorder:settings';
-const DOMAIN_INDEX_PREFIX = 'haravan:checkorder:domain';
+const STORE_PREFIX = 'haravan:checkorders:store';
+const SETTINGS_PREFIX = 'haravan:checkorders:settings';
+const DOMAIN_INDEX_PREFIX = 'haravan:checkorders:domain';
 const TRIAL_DAYS = 15;
 
 const DEFAULT_WIDGET_TEXTS: Record<string, string> = {

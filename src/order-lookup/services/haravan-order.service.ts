@@ -43,7 +43,7 @@ interface HaravanOrdersResponse {
   orders?: HaravanOrder[];
 }
 
-const CACHE_PREFIX = 'haravan:checkorder:cache';
+const CACHE_PREFIX = 'haravan:checkorders:cache';
 const DEFAULT_LOOKBACK_DAYS = 365;
 const DEFAULT_MAX_PAGES = 20;
 const MAX_PAGE_RETRIES = 3;
@@ -51,7 +51,7 @@ const DEFAULT_FALLBACK_LOOKBACK_DAYS = 3650;
 const DEFAULT_FALLBACK_MAX_PAGES = 80;
 const DEFAULT_CACHE_SECONDS = 180;
 const DEFAULT_NEGATIVE_CACHE_SECONDS = 45;
-const TELEMETRY_PREFIX = 'haravan:checkorder:telemetry';
+const TELEMETRY_PREFIX = 'haravan:checkorders:telemetry';
 
 type CachedLookup =
   | HaravanOrder[]

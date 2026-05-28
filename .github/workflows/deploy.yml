@@ -1,4 +1,4 @@
-name: Deploy Haravan CheckOrders to DO VPS
+name: Deploy Haravan CheckOrders to DO
 
 on:
   push:

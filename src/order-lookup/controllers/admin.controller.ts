@@ -25,8 +25,8 @@ import { PrismaService } from '../../database/prisma.service';
 import * as fs from 'fs';
 import * as path from 'path';
 
-const LOG_PREFIX = 'haravan:checkorder:log';
-const TELEMETRY_PREFIX = 'haravan:checkorder:telemetry';
+const LOG_PREFIX = 'haravan:checkorders:log';
+const TELEMETRY_PREFIX = 'haravan:checkorders:telemetry';
 
 const widgetApiUrl = (): string =>
   (process.env.WIDGET_API_URL || '').replace(/\/+$/, '');

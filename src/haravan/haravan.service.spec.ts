@@ -187,7 +187,7 @@ describe('HaravanService OAuth security', () => {
 
   it('creates one-time state and verifies a signed login id_token', async () => {
     const { service, redis } = createService();
-    redis.set('haravan:checkorder:app_install:org_1', {
+    redis.set('haravan:checkorders:app_install:org_1', {
       access_token: 'old-access-token',
       status: 'trial',
     });
@@ -236,7 +236,7 @@ describe('HaravanService OAuth security', () => {
 
   it('uses id_token orgid when the requested orgid is stale', async () => {
     const { service, redis } = createService();
-    redis.set('haravan:checkorder:app_install:org_1', {
+    redis.set('haravan:checkorders:app_install:org_1', {
       access_token: 'old-access-token',
       status: 'trial',
     });
@@ -271,7 +271,7 @@ describe('HaravanService OAuth security', () => {
 
   it('rejects a signed id_token with the wrong audience', async () => {
     const { service, redis } = createService();
-    redis.set('haravan:checkorder:app_install:org_1', {
+    redis.set('haravan:checkorders:app_install:org_1', {
       access_token: 'old-access-token',
       status: 'trial',
     });
@@ -305,7 +305,7 @@ describe('HaravanService OAuth security', () => {
 
   it('requires OAuth SSO when shop and orgid match but no signed HMAC is present', async () => {
     const { service, redis } = createService();
-    redis.set('haravan:checkorder:app_install:org_1', {
+    redis.set('haravan:checkorders:app_install:org_1', {
       orgid: 'org_1',
       access_token: 'old-access-token',
       token_expires_at: Date.now() + 60 * 60 * 1000,
@@ -318,15 +318,15 @@ describe('HaravanService OAuth security', () => {
     expect(result.orgid).toBeUndefined();
     expect(result.sessionToken).toBeUndefined();
     expect(result.url).toContain('/connect/authorize');
-    expect(redis.get('haravan:checkorder:shop_domain:shop.myharavan.com')).toBe(
+    expect(redis.get('haravan:checkorders:shop_domain:shop.myharavan.com')).toBe(
       'org_1',
     );
   });
 
   it('does not create a session when shop mapping belongs to another orgid', async () => {
     const { service, redis } = createService();
-    redis.set('haravan:checkorder:shop_domain:shop.myharavan.com', 'org_2');
-    redis.set('haravan:checkorder:app_install:org_1', {
+    redis.set('haravan:checkorders:shop_domain:shop.myharavan.com', 'org_2');
+    redis.set('haravan:checkorders:app_install:org_1', {
       orgid: 'org_1',
       access_token: 'old-access-token',
       token_expires_at: Date.now() + 60 * 60 * 1000,
@@ -355,7 +355,7 @@ describe('HaravanService OAuth security', () => {
       .update(rawBody)
       .digest('base64');
 
-    redis.set('haravan:checkorder:app_install:org_1', {
+    redis.set('haravan:checkorders:app_install:org_1', {
       orgid: 'org_1',
       access_token: 'old-access-token',
       token_expires_at: Date.now() + 60 * 60 * 1000,
@@ -377,7 +377,7 @@ describe('HaravanService OAuth security', () => {
     expect(result).toEqual(
       expect.objectContaining({ ok: true, orgid: 'org_1' }),
     );
-    expect(redis.get('haravan:checkorder:app_subscriptions:org_1')).toEqual(
+    expect(redis.get('haravan:checkorders:app_subscriptions:org_1')).toEqual(
       expect.objectContaining({
         orgid: 'org_1',
         status: 'active',
@@ -385,7 +385,7 @@ describe('HaravanService OAuth security', () => {
         is_active: true,
       }),
     );
-    expect(redis.get('haravan:checkorder:app_install:org_1')).toEqual(
+    expect(redis.get('haravan:checkorders:app_install:org_1')).toEqual(
       expect.objectContaining({
         status: 'active',
         plan: 'Pro',
@@ -393,13 +393,13 @@ describe('HaravanService OAuth security', () => {
       }),
     );
     expect(
-      redis.store.get('haravan:checkorder:app_install:org_1')?.expiresAt,
+      redis.store.get('haravan:checkorders:app_install:org_1')?.expiresAt,
     ).toBeUndefined();
   });
 
   it('keeps Pro app session available when token was marked invalid_grant', async () => {
     const { service, redis } = createService();
-    redis.set('haravan:checkorder:app_install:org_1', {
+    redis.set('haravan:checkorders:app_install:org_1', {
       orgid: 'org_1',
       access_token: 'stale-access-token',
       refresh_token: 'bad-refresh-token',

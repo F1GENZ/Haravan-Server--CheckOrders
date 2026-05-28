@@ -15,11 +15,11 @@ import axios from 'axios';
 import * as crypto from 'crypto';
 import type { Request, Response } from 'express';
 
-const REDIS_PREFIX = 'haravan:checkorder:app_install';
-const OAUTH_STATE_PREFIX = 'haravan:checkorder:oauth_state';
-const SHOP_DOMAIN_PREFIX = 'haravan:checkorder:shop_domain';
-const SUBSCRIPTION_PREFIX = 'haravan:checkorder:app_subscriptions';
-const REFRESH_LOCK_PREFIX = 'haravan:checkorder:token_refresh_lock';
+const REDIS_PREFIX = 'haravan:checkorders:app_install';
+const OAUTH_STATE_PREFIX = 'haravan:checkorders:oauth_state';
+const SHOP_DOMAIN_PREFIX = 'haravan:checkorders:shop_domain';
+const SUBSCRIPTION_PREFIX = 'haravan:checkorders:app_subscriptions';
+const REFRESH_LOCK_PREFIX = 'haravan:checkorders:token_refresh_lock';
 const OAUTH_STATE_TTL_SECONDS = 10 * 60;
 const JWKS_CACHE_TTL_MS = 10 * 60 * 1000;
 const JWT_CLOCK_SKEW_SECONDS = 60;

@@ -35,7 +35,7 @@ export class NotificationService {
     this.lastSent.set(dedupeKey, Date.now());
 
     const appName =
-      this.config.get<string>('TELEGRAM_APP_NAME') || 'F1GENZ Check Order';
+      this.config.get<string>('TELEGRAM_APP_NAME') || 'F1GENZ CheckOrders';
     const appEnv = this.config.get<string>('TELEGRAM_APP_ENV') || 'production';
     const text = this.truncate(
       `[${appName}] ${event}\nEnv: ${appEnv}\n${JSON.stringify(

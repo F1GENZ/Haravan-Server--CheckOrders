@@ -24,7 +24,7 @@ export class HealthController {
 
     return {
       ok: redisStatus === 'ok' && databaseStatus !== 'error',
-      app: this.config.get<string>('TELEGRAM_APP_NAME') || 'F1GENZ Check Order',
+      app: this.config.get<string>('TELEGRAM_APP_NAME') || 'F1GENZ CheckOrders',
       env: this.config.get<string>('NODE_ENV') || 'development',
       uptime_seconds: Math.round(process.uptime()),
       services: {

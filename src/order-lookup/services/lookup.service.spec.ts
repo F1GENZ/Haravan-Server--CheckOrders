@@ -106,10 +106,10 @@ describe('LookupService storefront origin handling', () => {
       '0901234567',
       '#10001',
       '203.0.113.10',
-      'https://checkorder.example.com',
+      'https://checkorders.example.com',
       'https://shop.example.com',
       undefined,
-      'checkorder.example.com',
+      'checkorders.example.com',
     );
 
     expect(response.success).toBe(true);
@@ -131,10 +131,10 @@ describe('LookupService storefront origin handling', () => {
       '0901234567',
       '#10001',
       '203.0.113.10',
-      'https://checkorder.example.com',
+      'https://checkorders.example.com',
       'https://evil.example.net',
       undefined,
-      'checkorder.example.com',
+      'checkorders.example.com',
     );
 
     expect(response).toMatchObject({
@@ -152,10 +152,10 @@ describe('LookupService storefront origin handling', () => {
       '0901234567',
       '#10001',
       '203.0.113.10',
-      'https://checkorder.example.com',
+      'https://checkorders.example.com',
       'https://shop.myharavan.com',
       undefined,
-      'checkorder.example.com',
+      'checkorders.example.com',
     );
 
     expect(response.success).toBe(true);

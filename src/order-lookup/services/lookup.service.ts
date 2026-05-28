@@ -20,7 +20,7 @@ import type {
 import * as crypto from 'crypto';
 import axios from 'axios';
 
-const LOG_PREFIX = 'haravan:checkorder:log';
+const LOG_PREFIX = 'haravan:checkorders:log';
 
 const textValue = (value: unknown): string | undefined => {
   if (typeof value === 'string') return value;
