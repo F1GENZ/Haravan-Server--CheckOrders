@@ -156,6 +156,8 @@ export class LookupController {
   var triggerAction = ${JSON.stringify(triggerAction)};
   var triggerLinkUrl = ${JSON.stringify(triggerLinkUrl)};
   if (document.getElementById(frameId)) return;
+  var frameLoaded = false;
+  var pendingOpen = false;
 
   var frame = document.createElement("iframe");
   frame.id = frameId;
@@ -163,6 +165,13 @@ export class LookupController {
   frame.title = "Tra cứu đơn hàng";
   frame.loading = "lazy";
   frame.style.cssText = "position:fixed;right:20px;bottom:20px;width:252px;height:96px;border:0;z-index:2147483647;background:transparent;";
+  frame.addEventListener("load", function () {
+    frameLoaded = true;
+    if (pendingOpen) {
+      pendingOpen = false;
+      postBack(frame.contentWindow, widgetOrigin, { type: "f1g_widget_trigger_open" });
+    }
+  });
   document.body.appendChild(frame);
 
   var widgetOrigin;
@@ -184,6 +193,7 @@ export class LookupController {
     if (open) {
       frame.style.display = "block";
       frame.style.pointerEvents = "auto";
+      frame.style.opacity = "1";
       frame.style.left = "0";
       frame.style.top = "0";
       frame.style.right = "0";
@@ -192,8 +202,9 @@ export class LookupController {
       frame.style.height = "100vh";
     } else {
       if (displayMode === "trigger") {
-        frame.style.display = "none";
+        frame.style.display = "block";
         frame.style.pointerEvents = "none";
+        frame.style.opacity = "0";
         frame.style.left = "auto";
         frame.style.top = "auto";
         frame.style.right = "0";
@@ -203,6 +214,7 @@ export class LookupController {
       } else {
         frame.style.display = "block";
         frame.style.pointerEvents = "auto";
+        frame.style.opacity = "1";
         frame.style.left = "auto";
         frame.style.top = "auto";
         frame.style.right = "20px";
@@ -215,25 +227,23 @@ export class LookupController {
 
   function openWidget(evt) {
     if (evt && evt.preventDefault) evt.preventDefault();
+    if (evt && evt.stopPropagation) evt.stopPropagation();
     if (displayMode !== "trigger") return;
     if (triggerAction === "link") {
       window.location.href = triggerLinkUrl || widgetUrl;
       return;
     }
     setPopupFrame(true);
-    postBack(frame.contentWindow, widgetOrigin, { type: "f1g_widget_trigger_open" });
-  }
-
-  function bindTriggerButtons(root) {
-    var selector = "[data-f1g-checkorders-open]";
-    var els = (root || document).querySelectorAll(selector);
-    els.forEach(function (el) {
-      if (el.__f1gBound) return;
-      var target = (el.getAttribute("data-f1g-checkorders-open") || "").trim();
-      if (target && target !== ${JSON.stringify(publicShop)}) return;
-      el.__f1gBound = true;
-      el.addEventListener("click", openWidget);
-    });
+    frame.style.opacity = "1";
+    frame.style.pointerEvents = "auto";
+    if (frameLoaded) {
+      postBack(frame.contentWindow, widgetOrigin, { type: "f1g_widget_trigger_open" });
+      window.setTimeout(function () {
+        postBack(frame.contentWindow, widgetOrigin, { type: "f1g_widget_trigger_open" });
+      }, 120);
+    } else {
+      pendingOpen = true;
+    }
   }
 
   window.F1GENZCheckOrders = window.F1GENZCheckOrders || {};
@@ -250,10 +260,15 @@ export class LookupController {
 
   if (displayMode === "trigger") {
     setPopupFrame(false);
-    bindTriggerButtons(document);
-    if (document.readyState === "loading") {
-      document.addEventListener("DOMContentLoaded", function () { bindTriggerButtons(document); }, { once: true });
-    }
+    document.addEventListener("click", function (evt) {
+      var el = evt.target && evt.target.closest
+        ? evt.target.closest("[data-f1g-checkorders-open]")
+        : null;
+      if (!el) return;
+      var target = (el.getAttribute("data-f1g-checkorders-open") || "").trim();
+      if (target && target !== ${JSON.stringify(publicShop)}) return;
+      openWidget(evt);
+    });
   }
 
   function normalizeItem(item) {
