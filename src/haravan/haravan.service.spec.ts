@@ -159,17 +159,19 @@ describe('HaravanService OAuth security', () => {
 
   const createService = () => {
     const redis = new RedisMock();
+    const storeService = {
+      getStoreByDomain: jest.fn(),
+      getStoreByOrgId: jest.fn(),
+      registerStore: jest.fn(),
+      deactivateStore: jest.fn(),
+    };
     const service = new HaravanService(
       makeConfig(),
       redis as never,
       { getShop: jest.fn() } as never,
-      {
-        getStoreByDomain: jest.fn(),
-        getStoreByOrgId: jest.fn(),
-        registerStore: jest.fn(),
-      } as never,
+      storeService as never,
     );
-    return { service, redis };
+    return { service, redis, storeService };
   };
 
   const tokenClaims = (nonce: string, overrides = {}) => {
@@ -425,5 +427,111 @@ describe('HaravanService OAuth security', () => {
       expect.stringContaining('error=install_failed'),
     );
     expect(mockedAxios.post.mock.calls).toHaveLength(0);
+  });
+
+  it('handles app uninstall webhook without deleting reinstall data', async () => {
+    const { service, redis, storeService } = createService();
+    const body = {
+      orgid: 'org_1',
+      shop_domain: 'hangquoctai.myharavan.com',
+    };
+    const rawBody = Buffer.from(JSON.stringify(body));
+    const hmac = crypto
+      .createHmac('sha256', 'webhook-secret')
+      .update(rawBody)
+      .digest('base64');
+
+    redis.set('haravan:checkorders:app_install:org_1', {
+      orgid: 'org_1',
+      access_token: 'old-access-token',
+      refresh_token: 'old-refresh-token',
+      status: 'active',
+      plan: 'Pro',
+      primary_domain: 'hangquoctai.myharavan.com',
+    });
+    redis.set(
+      'haravan:checkorders:shop_domain:hangquoctai.myharavan.com',
+      'org_1',
+    );
+
+    const result = await service.handleWebhook({
+      rawBody,
+      body,
+      query: {},
+      headers: {
+        'x-haravan-hmacsha256': hmac,
+        'x-haravan-topic': 'app/uninstalled',
+      },
+    } as Request & { rawBody: Buffer });
+
+    expect(result).toEqual(
+      expect.objectContaining({ ok: true, orgid: 'org_1', uninstalled: true }),
+    );
+    expect(storeService.deactivateStore).toHaveBeenCalledWith('org_1');
+    expect(
+      redis.get('haravan:checkorders:shop_domain:hangquoctai.myharavan.com'),
+    ).toBeNull();
+    expect(redis.get('haravan:checkorders:app_install:org_1')).toEqual(
+      expect.objectContaining({
+        orgid: 'org_1',
+        status: 'uninstalled',
+        plan: 'Pro',
+        haravan_token_status: 'uninstalled',
+      }),
+    );
+  });
+
+  it('handles shop update webhook and resyncs domain mapping', async () => {
+    const { service, redis, storeService } = createService();
+    const body = {
+      orgid: 'org_1',
+      domain: 'hangquoctai.com',
+      primary_domain: 'hangquoctai.com',
+      myharavan_domain: 'hangquoctai.myharavan.com',
+    };
+    const rawBody = Buffer.from(JSON.stringify(body));
+    const hmac = crypto
+      .createHmac('sha256', 'webhook-secret')
+      .update(rawBody)
+      .digest('base64');
+
+    redis.set('haravan:checkorders:app_install:org_1', {
+      orgid: 'org_1',
+      access_token: 'old-access-token',
+      refresh_token: 'old-refresh-token',
+      status: 'active',
+      primary_domain: 'old-domain.com',
+      domain: 'old-domain.com',
+      myharavan_domain: 'hangquoctai.myharavan.com',
+    });
+
+    const result = await service.handleWebhook({
+      rawBody,
+      body,
+      query: {},
+      headers: {
+        'x-haravan-hmacsha256': hmac,
+        'x-haravan-topic': 'shop/update',
+      },
+    } as Request & { rawBody: Buffer });
+
+    expect(result).toEqual(
+      expect.objectContaining({ ok: true, orgid: 'org_1' }),
+    );
+    expect(storeService.registerStore).toHaveBeenCalled();
+    expect(redis.get('haravan:checkorders:app_install:org_1')).toEqual(
+      expect.objectContaining({
+        orgid: 'org_1',
+        domain: 'hangquoctai.com',
+        primary_domain: 'hangquoctai.com',
+        myharavan_domain: 'hangquoctai.myharavan.com',
+      }),
+    );
+    expect(redis.get('haravan:checkorders:shop_domain:hangquoctai.com')).toBe(
+      'org_1',
+    );
+    expect(
+      redis.get('haravan:checkorders:shop_domain:hangquoctai.myharavan.com'),
+    ).toBe('org_1');
   });
 });
