@@ -1,0 +1,41 @@
+name: Deploy Haravan CheckOrders to DO VPS
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    name: Deploy via SSH
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 🧾 Checkout source
+        uses: actions/checkout@v3
+
+      - name: 🔐 Setup SSH connection
+        uses: webfactory/ssh-agent@v0.7.0
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+      - name: Deploy to VPS
+        run: |
+          ssh -o StrictHostKeyChecking=no ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} << 'EOF'
+            cd ${{ secrets.APP_DIR }}
+            git fetch origin main
+            git checkout main
+            git pull --ff-only origin main
+
+            npm ci
+            npm run db:generate
+            npx prisma migrate deploy
+            npm run build
+
+            pm2 restart haravan-checkorders --update-env || pm2 start dist/main.js --name haravan-checkorders
+            pm2 save
+
+            APP_PORT=$(grep '^PORT=' .env | tail -n 1 | cut -d '=' -f2 | tr -d '\r')
+            if [ -z "$APP_PORT" ]; then APP_PORT=3333; fi
+            curl -fsS "http://127.0.0.1:${APP_PORT}/api/health"
+          EOF

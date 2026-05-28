@@ -1,0 +1,1843 @@
+<!-- F1GENZ Check Order — Professional Order Tracking Widget -->
+
+<div
+  id='f1g-ot'
+  class='f1g-ot'
+  data-api='{{ settings.f1g_order_api_url | default: 'https://checkorder-api.example.com' }}'
+  data-shop='{{ settings.f1g_order_shop | default: '' }}'
+>
+  <button id='f1g-popup-btn' class='f1g-ot__popup-btn' type='button' aria-expanded='false'>
+    <svg viewBox='0 0 24 24' fill='none' aria-hidden='true'>
+      <path d='M6 7h12l-1 12H7L6 7Z' stroke='currentColor' stroke-width='1.8' stroke-linejoin='round'/>
+      <path d='M9 7a3 3 0 0 1 6 0' stroke='currentColor' stroke-width='1.8' stroke-linecap='round'/>
+      <path d='M9 12h6M9 15h4' stroke='currentColor' stroke-width='1.8' stroke-linecap='round'/>
+    </svg>
+    <span>Tra cứu đơn hàng</span>
+  </button>
+  <div id='f1g-popup-backdrop' class='f1g-ot__popup-backdrop'></div>
+  <div class='f1g-ot__wrap'>
+    <button id='f1g-popup-close' class='f1g-ot__popup-close' type='button' aria-label='Đóng'>×</button>
+    <!-- ─── Left: Search Panel ─── -->
+    <div class='f1g-ot__search'>
+      <div class='f1g-ot__search-inner'>
+        <h2 class='f1g-ot__heading'>Tra cứu đơn hàng</h2>
+        <p class='f1g-ot__sub'>Nhập thông tin để xem trạng thái đơn hàng của bạn</p>
+
+        <div class='f1g-ot__tabs'>
+          <button class='f1g-ot__tab f1g-ot__tab--on' data-tab='phone' type='button'>Số điện thoại</button>
+          <button class='f1g-ot__tab' data-tab='code' type='button'>Mã đơn hàng</button>
+        </div>
+
+        <div id='f1g-phone-wrap' class='f1g-ot__field'>
+          <label class='f1g-ot__label' for='f1g-phone'>Số điện thoại</label>
+          <input
+            type='tel'
+            id='f1g-phone'
+            placeholder='0901 234 567'
+            class='f1g-ot__input'
+            autocomplete='tel'
+            maxlength='12'
+          >
+        </div>
+        <div id='f1g-code-wrap' class='f1g-ot__field' style='display:none'>
+          <label class='f1g-ot__label' for='f1g-order-code'>Mã đơn hàng</label>
+          <input
+            type='text'
+            id='f1g-order-code'
+            placeholder='#10000'
+            class='f1g-ot__input'
+            autocomplete='off'
+            maxlength='20'
+          >
+        </div>
+
+        <button id='f1g-btn' class='f1g-ot__btn' type='button'>
+          <span class='f1g-ot__btn-txt'>Tra cứu</span>
+          <svg class='f1g-ot__spinner' viewBox='0 0 24 24' fill='none' style='display:none'>
+            <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" opacity=".3"/>
+            <path d="M12 2a10 10 0 019.95 9" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+          </svg>
+        </button>
+
+        <div id='f1g-err' class='f1g-ot__err' style='display:none'><p id='f1g-err-msg'></p></div>
+      </div>
+    </div>
+
+    <!-- ─── Right: Results Panel ─── -->
+    <div class='f1g-ot__results' id='f1g-results'>
+      <div class='f1g-ot__empty' id='f1g-empty'>
+        <svg viewBox='0 0 80 80' fill='none' class='f1g-ot__empty-icon'>
+          <rect x="10" y="18" width="60" height="44" rx="6" stroke="#cbd5e1" stroke-width="2"/>
+          <path d="M10 30h60" stroke="#cbd5e1" stroke-width="2"/>
+          <rect x="18" y="38" width="20" height="4" rx="2" fill="#e2e8f0"/>
+          <rect x="18" y="46" width="30" height="4" rx="2" fill="#e2e8f0"/>
+          <rect x="18" y="54" width="15" height="4" rx="2" fill="#e2e8f0"/>
+          <circle cx="56" cy="50" r="8" fill="#f1f5f9" stroke="#cbd5e1" stroke-width="2"/>
+          <path d="M53 50l2 2 4-4" stroke="#94a3b8" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <p class='f1g-ot__empty-title'>Chưa có kết quả</p>
+        <p class='f1g-ot__empty-desc'>Nhập thông tin bên trái để tra cứu đơn hàng</p>
+      </div>
+      <div id='f1g-order-list' style='display:none'></div>
+      <div id='f1g-paging' class='f1g-ot__paging' style='display:none'></div>
+    </div>
+  </div>
+</div>
+
+<style>
+  :root {
+    --f1g-primary: #4361ee;
+    --f1g-primary-dark: #3651d4;
+    --f1g-bg: #f8fafc;
+    --f1g-card: #fff;
+    --f1g-border: #e8e8ee;
+    --f1g-text: #1e293b;
+    --f1g-muted: #94a3b8;
+    --f1g-success: #16a34a;
+    --f1g-warning: #d97706;
+    --f1g-danger: #dc2626;
+    --f1g-info: #0284c7;
+    --f1g-radius: 14px;
+    --f1g-font: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  }
+  .f1g-ot {
+    max-width: 1200px;
+    margin: 0 auto;
+    font-family: var(--f1g-font);
+    color: var(--f1g-text);
+    line-height: 1.5;
+    width: 100%;
+  }
+  .f1g-ot * {
+    box-sizing: border-box;
+  }
+  .f1g-ot__popup-btn,
+  .f1g-ot__popup-backdrop,
+  .f1g-ot__popup-close {
+    display: none;
+  }
+  .f1g-ot--popup {
+    max-width: none;
+    margin: 0;
+    width: auto;
+  }
+  .f1g-ot--popup .f1g-ot__popup-btn {
+    position: fixed;
+    right: 0;
+    bottom: 0;
+    z-index: 2147483646;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.55rem;
+    min-width: 190px;
+    max-width: calc(100vw - 12px);
+    height: 56px;
+    padding: 0 1rem;
+    border: 0;
+    border-radius: 999px;
+    background: var(--f1g-primary);
+    color: #fff;
+    box-shadow: 0 14px 34px rgba(15, 23, 42, 0.24);
+    font-family: var(--f1g-font);
+    font-size: 0.9rem;
+    font-weight: 800;
+    cursor: pointer;
+  }
+  .f1g-ot--popup .f1g-ot__popup-btn svg {
+    width: 20px;
+    height: 20px;
+    flex-shrink: 0;
+  }
+  .f1g-ot--popup .f1g-ot__popup-btn:hover {
+    background: var(--f1g-primary-dark);
+  }
+  .f1g-ot--popup .f1g-ot__popup-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 2147483644;
+    background: rgba(15, 23, 42, 0.38);
+    backdrop-filter: blur(2px);
+  }
+  .f1g-ot--popup .f1g-ot__wrap {
+    display: none;
+  }
+  .f1g-ot--popup.f1g-ot--popup-open .f1g-ot__popup-btn {
+    display: none;
+  }
+  .f1g-ot--popup.f1g-ot--popup-open .f1g-ot__popup-backdrop {
+    display: block;
+  }
+  .f1g-ot--popup.f1g-ot--popup-open .f1g-ot__wrap {
+    position: fixed;
+    right: 20px;
+    bottom: 20px;
+    z-index: 2147483645;
+    display: grid;
+    width: min(980px, calc(100vw - 40px));
+    max-height: calc(100vh - 40px);
+    min-height: 560px;
+    background: var(--f1g-card);
+  }
+  .f1g-ot--popup.f1g-ot--popup-open .f1g-ot__popup-close {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    z-index: 3;
+    display: flex;
+    width: 32px;
+    height: 32px;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--f1g-border);
+    border-radius: 999px;
+    background: #fff;
+    color: #475569;
+    font-size: 1.3rem;
+    line-height: 1;
+    cursor: pointer;
+    box-shadow: 0 2px 8px rgba(15, 23, 42, 0.1);
+  }
+  .f1g-ot--popup.f1g-ot--popup-open .f1g-ot__popup-close:hover {
+    color: var(--f1g-primary);
+    border-color: var(--f1g-primary);
+  }
+  .f1g-ot__wrap {
+    display: grid;
+    grid-template-columns: 340px 1fr;
+    gap: 0;
+    min-height: 560px;
+    border: 1px solid var(--f1g-border);
+    border-radius: var(--f1g-radius);
+    overflow: hidden;
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.06);
+  }
+
+  /* Search panel */
+  .f1g-ot__search {
+    background: var(--f1g-card);
+    border-right: 1px solid var(--f1g-border);
+    display: flex;
+    flex-direction: column;
+  }
+  .f1g-ot__search-inner {
+    padding: 2rem 1.5rem;
+    flex: 1;
+  }
+  .f1g-ot__heading {
+    font-size: 1.25rem;
+    font-weight: 800;
+    margin: 0 0 0.25rem;
+    color: var(--f1g-text);
+  }
+  .f1g-ot__sub {
+    font-size: 0.82rem;
+    color: var(--f1g-muted);
+    margin: 0 0 1.5rem;
+  }
+  .f1g-ot__tabs {
+    display: flex;
+    border-radius: 10px;
+    background: #f1f5f9;
+    padding: 3px;
+    margin-bottom: 1.25rem;
+  }
+  .f1g-ot__tab {
+    flex: 1;
+    padding: 0.5rem;
+    border: none;
+    background: 0 0;
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: #64748b;
+    cursor: pointer;
+    border-radius: 8px;
+    transition: 0.2s;
+  }
+  .f1g-ot__tab:hover {
+    color: #334155;
+  }
+  .f1g-ot__tab--on {
+    background: #fff;
+    color: var(--f1g-text);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  }
+  .f1g-ot__field {
+    margin-bottom: 1rem;
+  }
+  .f1g-ot__label {
+    display: block;
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--f1g-muted);
+    margin-bottom: 0.35rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .f1g-ot__input {
+    width: 100%;
+    padding: 0.7rem 0.9rem;
+    border: 1.5px solid #d1d5db;
+    border-radius: 10px;
+    font-size: 0.95rem;
+    background: #fafafa;
+    outline: 0;
+    transition: 0.2s;
+  }
+  .f1g-ot__input:focus {
+    border-color: var(--f1g-primary);
+    background: #fff;
+    box-shadow: 0 0 0 3px rgba(67, 97, 238, 0.12);
+  }
+  .f1g-ot__btn {
+    width: 100%;
+    padding: 0.75rem;
+    background: var(--f1g-primary);
+    color: #fff;
+    border: none;
+    border-radius: 10px;
+    font-size: 0.92rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+  }
+  .f1g-ot__btn:hover {
+    background: var(--f1g-primary-dark);
+  }
+  .f1g-ot__btn:disabled {
+    background: #94a3b8;
+    cursor: not-allowed;
+  }
+  .f1g-ot--disabled .f1g-ot__input,
+  .f1g-ot--disabled .f1g-ot__tab {
+    opacity: 0.65;
+    cursor: not-allowed;
+  }
+  .f1g-ot__spinner {
+    width: 20px;
+    height: 20px;
+    animation: f1g-sp 0.7s linear infinite;
+  }
+  @keyframes f1g-sp {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+  .f1g-ot__err {
+    margin-top: 1rem;
+    padding: 0.75rem;
+    background: #fef2f2;
+    border-radius: 8px;
+    color: #991b1b;
+    font-size: 0.85rem;
+    text-align: center;
+  }
+  .f1g-ot__err p {
+    margin: 0;
+  }
+
+  /* Results panel */
+  .f1g-ot__results {
+    background: var(--f1g-bg);
+    overflow-y: auto;
+    max-height: 720px;
+    padding: 1.5rem;
+  }
+  .f1g-ot__empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    min-height: 350px;
+    text-align: center;
+    color: var(--f1g-muted);
+  }
+  .f1g-ot__empty-icon {
+    width: 80px;
+    height: 80px;
+    margin-bottom: 1rem;
+    opacity: 0.6;
+  }
+  .f1g-ot__empty-title {
+    font-size: 1rem;
+    font-weight: 600;
+    margin: 0 0 0.25rem;
+    color: #64748b;
+  }
+  .f1g-ot__empty-desc {
+    font-size: 0.82rem;
+    margin: 0;
+  }
+
+  /* Order card */
+  .f1g-ot__card {
+    background: var(--f1g-card);
+    border: 1px solid var(--f1g-border);
+    border-radius: 12px;
+    margin-bottom: 1rem;
+    overflow: hidden;
+    animation: f1g-fi 0.3s ease;
+  }
+  @keyframes f1g-fi {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  .f1g-ot__card-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.75rem 1rem;
+    background: linear-gradient(135deg, #f8fafc, #f1f5f9);
+    border-bottom: 1px solid #f0f0f5;
+  }
+  .f1g-ot__order-num {
+    font-weight: 700;
+    font-size: 1rem;
+  }
+  .f1g-ot__badge {
+    padding: 0.2rem 0.65rem;
+    border-radius: 99px;
+    font-size: 0.68rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .f1g-ot__badge--success {
+    background: #dcfce7;
+    color: #166534;
+  }
+  .f1g-ot__badge--pending {
+    background: #fef9c3;
+    color: #854d0e;
+  }
+  .f1g-ot__badge--cancelled {
+    background: #fee2e2;
+    color: #991b1b;
+  }
+  .f1g-ot__card-body {
+    padding: 1rem;
+  }
+
+  /* Timeline stepper */
+  .f1g-ot__timeline {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 1rem;
+    position: relative;
+    padding: 0 0.5rem;
+  }
+  .f1g-ot__timeline::before {
+    content: '';
+    position: absolute;
+    top: 14px;
+    left: 30px;
+    right: 30px;
+    height: 2px;
+    background: #e2e8f0;
+    z-index: 0;
+  }
+  .f1g-ot__timeline-bar {
+    position: absolute;
+    top: 14px;
+    left: 30px;
+    height: 2px;
+    background: var(--f1g-success);
+    z-index: 1;
+    transition: width 0.5s;
+  }
+  .f1g-ot__step {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    position: relative;
+    z-index: 2;
+    flex: 1;
+  }
+  .f1g-ot__step-dot {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: #e2e8f0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 0.35rem;
+    transition: 0.3s;
+    border: 2px solid #fff;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+  }
+  .f1g-ot__step-dot svg {
+    width: 14px;
+    height: 14px;
+    color: #fff;
+  }
+  .f1g-ot__step--done .f1g-ot__step-dot {
+    background: var(--f1g-success);
+  }
+  .f1g-ot__step--active .f1g-ot__step-dot {
+    background: var(--f1g-primary);
+    animation: f1g-pulse 2s infinite;
+  }
+  @keyframes f1g-pulse {
+    0%,
+    100% {
+      box-shadow: 0 0 0 0 rgba(67, 97, 238, 0.4);
+    }
+    50% {
+      box-shadow: 0 0 0 8px rgba(67, 97, 238, 0);
+    }
+  }
+  .f1g-ot__step-label {
+    font-size: 0.68rem;
+    color: var(--f1g-muted);
+    font-weight: 500;
+    text-align: center;
+    white-space: nowrap;
+  }
+  .f1g-ot__step--done .f1g-ot__step-label,
+  .f1g-ot__step--active .f1g-ot__step-label {
+    color: var(--f1g-text);
+    font-weight: 600;
+  }
+
+  /* Info grid */
+  .f1g-ot__info {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.4rem 0.6rem;
+    margin-bottom: 0.75rem;
+  }
+  .f1g-ot__info-lbl {
+    font-size: 0.72rem;
+    color: var(--f1g-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+  .f1g-ot__info-val {
+    font-size: 0.85rem;
+    font-weight: 500;
+    word-break: break-word;
+  }
+
+  /* Section separator */
+  .f1g-ot__sep {
+    font-size: 0.7rem;
+    font-weight: 700;
+    color: var(--f1g-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin: 0.75rem 0 0.5rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid #f0f0f5;
+  }
+
+  /* Product */
+  .f1g-ot__prod {
+    display: flex;
+    gap: 0.65rem;
+    padding: 0.5rem 0;
+    border-bottom: 1px solid #f8f8fa;
+    align-items: center;
+  }
+  .f1g-ot__prod:last-child {
+    border-bottom: none;
+  }
+  .f1g-ot__prod-img {
+    width: 48px;
+    height: 48px;
+    border-radius: 8px;
+    object-fit: cover;
+    background: #f1f5f9;
+    border: 1px solid #eee;
+    flex-shrink: 0;
+  }
+  .f1g-ot__prod-img-empty {
+    width: 48px;
+    height: 48px;
+    border-radius: 8px;
+    background: #f1f5f9;
+    border: 1px solid #eee;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.6rem;
+    color: #cbd5e1;
+  }
+  .f1g-ot__prod-detail {
+    flex: 1;
+    min-width: 0;
+  }
+  .f1g-ot__prod-name {
+    font-size: 0.84rem;
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .f1g-ot__prod-meta {
+    font-size: 0.72rem;
+    color: var(--f1g-muted);
+  }
+  .f1g-ot__prod-price {
+    text-align: right;
+    flex-shrink: 0;
+  }
+  .f1g-ot__prod-price-val {
+    font-size: 0.84rem;
+    font-weight: 600;
+  }
+  .f1g-ot__prod-price-qty {
+    font-size: 0.72rem;
+    color: var(--f1g-muted);
+  }
+
+  .f1g-ot__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 0.75rem;
+  }
+  .f1g-ot__action-btn {
+    appearance: none;
+    border: 1px solid var(--f1g-border);
+    background: #fff;
+    color: #1f2937;
+    border-radius: 8px;
+    padding: 0.4rem 0.75rem;
+    font-size: 0.76rem;
+    font-weight: 600;
+    cursor: pointer;
+    text-decoration: none;
+    transition: 0.2s;
+  }
+  .f1g-ot__action-btn:hover {
+    border-color: var(--f1g-primary);
+    color: var(--f1g-primary);
+  }
+  .f1g-ot__action-btn--primary {
+    background: var(--f1g-primary);
+    border-color: var(--f1g-primary);
+    color: #fff;
+  }
+  .f1g-ot__action-btn--primary:hover {
+    opacity: 0.9;
+    color: #fff;
+  }
+
+  /* Shipping */
+  .f1g-ot__ship {
+    padding: 0.5rem 0.7rem;
+    background: #f0f9ff;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+  }
+  .f1g-ot__ship-lbl {
+    font-size: 0.78rem;
+    color: #64748b;
+  }
+  .f1g-ot__ship-val {
+    font-size: 0.84rem;
+    font-weight: 600;
+    color: #0369a1;
+  }
+
+  /* Pagination */
+  .f1g-ot__paging {
+    display: flex;
+    justify-content: center;
+    gap: 0.35rem;
+    padding-top: 0.75rem;
+  }
+  .f1g-ot__page {
+    padding: 0.35rem 0.7rem;
+    border: 1px solid var(--f1g-border);
+    border-radius: 8px;
+    background: var(--f1g-card);
+    font-size: 0.8rem;
+    cursor: pointer;
+    transition: 0.2s;
+  }
+  .f1g-ot__page:hover {
+    border-color: var(--f1g-primary);
+    color: var(--f1g-primary);
+  }
+  .f1g-ot__page--on {
+    background: var(--f1g-primary);
+    color: #fff;
+    border-color: var(--f1g-primary);
+  }
+
+  /* Responsive */
+  @media (max-width: 720px) {
+    .f1g-ot--popup .f1g-ot__popup-btn {
+      right: 0;
+      bottom: 0;
+      min-width: 176px;
+      height: 54px;
+      font-size: 0.84rem;
+    }
+    .f1g-ot--popup.f1g-ot--popup-open .f1g-ot__wrap {
+      inset: 0;
+      width: 100vw;
+      max-height: 100vh;
+      min-height: 100vh;
+      border-radius: 0;
+      border: none;
+    }
+    .f1g-ot__wrap {
+      grid-template-columns: 1fr;
+      min-height: auto;
+    }
+    .f1g-ot__search {
+      border-right: none;
+      border-bottom: 1px solid var(--f1g-border);
+    }
+    .f1g-ot__results {
+      max-height: none;
+    }
+  }
+</style>
+
+<script>
+  (function () {
+    'use strict';
+    var root = document.getElementById('f1g-ot');
+    if (!root) return;
+    var API = root.dataset.api,
+      PUBLIC_SHOP = root.dataset.shop;
+    var btn = document.getElementById('f1g-btn');
+    var btnTxt = btn.querySelector('.f1g-ot__btn-txt');
+    var btnSp = btn.querySelector('.f1g-ot__spinner');
+    var phoneEl = document.getElementById('f1g-phone');
+    var codeEl = document.getElementById('f1g-order-code');
+    var errEl = document.getElementById('f1g-err');
+    var errMsg = document.getElementById('f1g-err-msg');
+    var popupBtn = document.getElementById('f1g-popup-btn');
+    var popupBackdrop = document.getElementById('f1g-popup-backdrop');
+    var popupClose = document.getElementById('f1g-popup-close');
+    var phoneW = document.getElementById('f1g-phone-wrap');
+    var codeW = document.getElementById('f1g-code-wrap');
+    var emptyEl = document.getElementById('f1g-empty');
+    var listEl = document.getElementById('f1g-order-list');
+    var pagingEl = document.getElementById('f1g-paging');
+    var activeTab = 'phone';
+    var lookupMethod = 'phone_and_code';
+    var displayMode = 'inline';
+    var captchaToken = '';
+    var captchaWidgetId = null;
+
+    // All orders + pagination
+    var allOrders = [];
+    var perPage = 3;
+    var curPage = 1;
+
+    // ─── i18n ───
+    var I18N = {
+      vi: {
+        heading: 'Tra cứu đơn hàng',
+        sub: 'Nhập thông tin để xem trạng thái đơn hàng của bạn',
+        tab_phone: 'Số điện thoại',
+        tab_code: 'Mã đơn hàng',
+        label_phone: 'Số điện thoại',
+        label_code: 'Mã đơn hàng',
+        placeholder_phone: '0901 234 567',
+        placeholder_code: '#10000',
+        btn_search: 'Tra cứu',
+        btn_loading: 'Đang tìm...',
+        empty_title: 'Chưa có kết quả',
+        empty_desc: 'Nhập thông tin bên trái để tra cứu đơn hàng',
+        err_phone: 'Vui lòng nhập số điện thoại',
+        err_code: 'Vui lòng nhập mã đơn hàng',
+        err_not_found: 'Không tìm thấy đơn hàng phù hợp.',
+        err_rate_limit: 'Bạn đã tra cứu quá nhiều lần, vui lòng thử lại sau.',
+        err_auth: 'Hệ thống đang bảo trì, vui lòng quay lại sau.',
+        err_server: 'Có lỗi xảy ra, vui lòng thử lại.',
+        err_network: 'Không thể kết nối. Kiểm tra mạng và thử lại.',
+        disabled_title: 'Tính năng tạm ngưng',
+        disabled_desc: 'Tra cứu đơn hàng hiện không khả dụng.',
+        sec_customer: 'Khách hàng',
+        sec_detail: 'Chi tiết đơn hàng',
+        sec_products: 'Sản phẩm',
+        lbl_name: 'Họ tên',
+        lbl_phone: 'SĐT',
+        lbl_email: 'Email',
+        lbl_address: 'Địa chỉ',
+        lbl_date: 'Ngày đặt',
+        lbl_total: 'Tổng cộng',
+        lbl_subtotal: 'Tạm tính',
+        lbl_discount: 'Giảm giá',
+        lbl_payment: 'Thanh toán',
+        lbl_tracking: 'Vận chuyển',
+        lbl_note: 'Ghi chú',
+        btn_rebuy: 'Mua lại',
+        popup_btn: 'Tra cứu đơn hàng',
+        step_ordered: 'Đặt hàng',
+        step_confirmed: 'Xác nhận',
+        step_shipping: 'Đang giao',
+        step_delivered: 'Đã giao',
+        status_paid: 'Đã thanh toán',
+        status_pending: 'Chờ thanh toán',
+        status_refunded: 'Đã hoàn tiền',
+        status_voided: 'Đã hủy',
+        status_partial_paid: 'Thanh toán một phần',
+        status_partial_refund: 'Hoàn tiền một phần',
+        fulfill_fulfilled: 'Đã giao hàng',
+        fulfill_partial: 'Giao một phần',
+        fulfill_unfulfilled: 'Chưa giao hàng',
+      },
+      en: {
+        heading: 'Track Your Order',
+        sub: 'Enter your information to check your order status',
+        tab_phone: 'Phone Number',
+        tab_code: 'Order Code',
+        label_phone: 'Phone Number',
+        label_code: 'Order Code',
+        placeholder_phone: '0901 234 567',
+        placeholder_code: '#10000',
+        btn_search: 'Search',
+        btn_loading: 'Searching...',
+        empty_title: 'No results yet',
+        empty_desc: 'Enter your information on the left to look up orders',
+        err_phone: 'Please enter your phone number',
+        err_code: 'Please enter your order code',
+        err_not_found: 'No matching orders found.',
+        err_rate_limit: 'Too many requests. Please try again later.',
+        err_auth: 'System is under maintenance. Please come back later.',
+        err_server: 'An error occurred. Please try again.',
+        err_network: 'Unable to connect. Check your network and try again.',
+        disabled_title: 'Feature Unavailable',
+        disabled_desc: 'Order tracking is currently unavailable.',
+        sec_customer: 'Customer',
+        sec_detail: 'Order Details',
+        sec_products: 'Products',
+        lbl_name: 'Name',
+        lbl_phone: 'Phone',
+        lbl_email: 'Email',
+        lbl_address: 'Address',
+        lbl_date: 'Order Date',
+        lbl_total: 'Total',
+        lbl_subtotal: 'Subtotal',
+        lbl_discount: 'Discount',
+        lbl_payment: 'Payment',
+        lbl_tracking: 'Shipping',
+        lbl_note: 'Note',
+        btn_rebuy: 'Buy Again',
+        popup_btn: 'Track Order',
+        step_ordered: 'Ordered',
+        step_confirmed: 'Confirmed',
+        step_shipping: 'Shipping',
+        step_delivered: 'Delivered',
+        status_paid: 'Paid',
+        status_pending: 'Pending',
+        status_refunded: 'Refunded',
+        status_voided: 'Voided',
+        status_partial_paid: 'Partially Paid',
+        status_partial_refund: 'Partially Refunded',
+        fulfill_fulfilled: 'Fulfilled',
+        fulfill_partial: 'Partially Fulfilled',
+        fulfill_unfulfilled: 'Unfulfilled',
+      },
+    };
+
+    var T = I18N.vi; // default language
+
+    // ─── Apply config ───
+    function applyConfig(cfg) {
+      if (!cfg) return;
+      window.__f1gConfig = Object.assign({}, window.__f1gConfig || {}, cfg);
+      cfg = window.__f1gConfig;
+
+      // Language: URL param ?lang= only
+      var urlLang = new URLSearchParams(window.location.search).get('lang');
+      var lang = urlLang || 'vi';
+      T = Object.assign({}, I18N[lang] || I18N.vi, sanitizeWidgetTexts(cfg.widget_texts));
+      applyLang();
+      applyDisplayMode(cfg.widget_display_mode || 'inline');
+
+      // Theme
+      var r = root.style;
+      if (cfg.theme_color) {
+        r.setProperty('--f1g-primary', cfg.theme_color);
+        r.setProperty('--f1g-primary-dark', cfg.theme_color);
+      }
+
+      // Disabled state
+      if (cfg.widget_enabled === false) {
+        setWidgetEnabled(false);
+        return;
+      }
+      setWidgetEnabled(true);
+
+      // Lookup method
+      var method = cfg.lookup_method || 'phone_and_code';
+      lookupMethod = method;
+      var tabsContainer = document.querySelector('.f1g-ot__tabs');
+
+      if (method === 'phone') {
+        if (tabsContainer) tabsContainer.style.display = 'none';
+        phoneW.style.display = 'block';
+        codeW.style.display = 'none';
+        activeTab = 'phone';
+      } else if (method === 'order_code') {
+        if (tabsContainer) tabsContainer.style.display = 'none';
+        phoneW.style.display = 'none';
+        codeW.style.display = 'block';
+        activeTab = 'code';
+      } else if (method === 'phone_and_code') {
+        if (tabsContainer) tabsContainer.style.display = 'none';
+        phoneW.style.display = 'block';
+        codeW.style.display = 'block';
+      } else {
+        if (tabsContainer) tabsContainer.style.display = '';
+        phoneW.style.display = activeTab === 'phone' ? 'block' : 'none';
+        codeW.style.display = activeTab === 'code' ? 'block' : 'none';
+      }
+
+      if (allOrders.length > 0) renderPage();
+    }
+
+    function applyLang() {
+      var h = root.querySelector('.f1g-ot__heading');
+      var s = root.querySelector('.f1g-ot__sub');
+      var tabs = root.querySelectorAll('.f1g-ot__tab');
+      var lbls = root.querySelectorAll('.f1g-ot__label');
+      var et = root.querySelector('.f1g-ot__empty-title');
+      var ed = root.querySelector('.f1g-ot__empty-desc');
+      var popupBtnText = root.querySelector('.f1g-ot__popup-btn span');
+      if (h) h.textContent = T.heading;
+      if (s) s.textContent = T.sub;
+      if (tabs[0]) tabs[0].textContent = T.tab_phone;
+      if (tabs[1]) tabs[1].textContent = T.tab_code;
+      if (lbls[0]) lbls[0].textContent = T.label_phone;
+      if (lbls[1]) lbls[1].textContent = T.label_code;
+      if (phoneEl) phoneEl.placeholder = T.placeholder_phone || '';
+      if (codeEl) codeEl.placeholder = T.placeholder_code || '';
+      if (btnTxt) btnTxt.textContent = T.btn_search;
+      if (et) et.textContent = T.empty_title;
+      if (ed) ed.textContent = T.empty_desc;
+      if (popupBtnText) popupBtnText.textContent = T.popup_btn;
+    }
+
+    function sanitizeWidgetTexts(value) {
+      var allowed = {
+        heading: 1,
+        sub: 1,
+        tab_phone: 1,
+        tab_code: 1,
+        label_phone: 1,
+        label_code: 1,
+        placeholder_phone: 1,
+        placeholder_code: 1,
+        btn_search: 1,
+        btn_loading: 1,
+        empty_title: 1,
+        empty_desc: 1,
+        err_phone: 1,
+        err_code: 1,
+        err_not_found: 1,
+        err_rate_limit: 1,
+        err_auth: 1,
+        err_server: 1,
+        err_network: 1,
+        disabled_title: 1,
+        disabled_desc: 1,
+        btn_rebuy: 1,
+        popup_btn: 1,
+      };
+      var out = {};
+      if (!value || typeof value !== 'object' || Array.isArray(value)) return out;
+      Object.keys(value).forEach(function (key) {
+        if (!allowed[key] || typeof value[key] !== 'string') return;
+        var text = value[key].trim();
+        if (text) out[key] = text.slice(0, 180);
+      });
+      return out;
+    }
+
+    function setWidgetEnabled(enabled) {
+      root.classList.toggle('f1g-ot--disabled', !enabled);
+      [phoneEl, codeEl, btn].forEach(function (el) {
+        if (el) el.disabled = !enabled;
+      });
+      document.querySelectorAll('.f1g-ot__tab').forEach(function (tab) {
+        tab.disabled = !enabled;
+      });
+      btnSp.style.display = 'none';
+      btnTxt.textContent = T.btn_search;
+      if (!enabled) {
+        errMsg.textContent = T.disabled_desc;
+        errEl.style.display = 'block';
+        listEl.style.display = 'none';
+        pagingEl.style.display = 'none';
+        emptyEl.style.display = 'block';
+      } else if (errMsg.textContent === T.disabled_desc) {
+        errEl.style.display = 'none';
+      }
+    }
+
+    function postPopupState(open) {
+      if (!isFramed()) return;
+      var parentOrigin = getParentOrigin(window.__f1gConfig || {});
+      window.parent.postMessage({ type: 'f1g_widget_popup_state', open: open }, parentOrigin || '*');
+    }
+
+    function setPopupOpen(open) {
+      if (displayMode !== 'popup') return;
+      root.classList.toggle('f1g-ot--popup-open', open);
+      if (popupBtn) popupBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+      postPopupState(open);
+      if (open) {
+        setTimeout(function () {
+          (activeTab === 'code' ? codeEl : phoneEl).focus();
+        }, 80);
+      }
+    }
+
+    function applyDisplayMode(mode) {
+      displayMode = mode === 'popup' ? 'popup' : 'inline';
+      var isPopup = displayMode === 'popup';
+      root.classList.toggle('f1g-ot--popup', isPopup);
+      if (isPopup) {
+        setPopupOpen(false);
+      } else {
+        root.classList.remove('f1g-ot--popup-open');
+        postPopupState(false);
+      }
+    }
+
+    // Apply server-injected config immediately
+    if (window.__f1gConfig) applyConfig(window.__f1gConfig);
+
+    // Tabs
+    document.querySelectorAll('.f1g-ot__tab').forEach(function (t) {
+      t.addEventListener('click', function () {
+        document.querySelectorAll('.f1g-ot__tab').forEach(function (x) {
+          x.classList.remove('f1g-ot__tab--on');
+        });
+        t.classList.add('f1g-ot__tab--on');
+        activeTab = t.dataset.tab;
+        phoneW.style.display = activeTab === 'phone' ? 'block' : 'none';
+        codeW.style.display = activeTab === 'code' ? 'block' : 'none';
+        (activeTab === 'phone' ? phoneEl : codeEl).focus();
+      });
+    });
+
+    if (popupBtn) {
+      popupBtn.addEventListener('click', function () {
+        setPopupOpen(true);
+      });
+    }
+    if (popupClose) {
+      popupClose.addEventListener('click', function () {
+        setPopupOpen(false);
+      });
+    }
+    if (popupBackdrop) {
+      popupBackdrop.addEventListener('click', function () {
+        setPopupOpen(false);
+      });
+    }
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') setPopupOpen(false);
+    });
+
+    [phoneEl, codeEl].forEach(function (el) {
+      if (el)
+        el.addEventListener('keydown', function (e) {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            btn.click();
+          }
+        });
+    });
+
+    function normalizePhone(v) {
+      var p = String(v || '').replace(/[\s\-().]/g, '');
+      if (p.indexOf('+84') === 0) p = '0' + p.slice(3);
+      else if (p.indexOf('84') === 0 && p.length > 10) p = '0' + p.slice(2);
+      return p;
+    }
+
+    function getStoreOrigin() {
+      try {
+        if (document.referrer) return new URL(document.referrer).origin;
+      } catch (e) {}
+      if (window.__f1gConfig && window.__f1gConfig.store_origin) return window.__f1gConfig.store_origin;
+      return window.location.origin;
+    }
+
+    function getPublicShop() {
+      var cfg = window.__f1gConfig || {};
+      return cfg.public_shop || PUBLIC_SHOP || '';
+    }
+
+    function isPreviewMode() {
+      var cfg = window.__f1gConfig || {};
+      return cfg.preview_enabled === true;
+    }
+
+    function randomizeOrders(orders) {
+      var cloned = (orders || []).slice();
+      for (var i = cloned.length - 1; i > 0; i--) {
+        var j = Math.floor(Math.random() * (i + 1));
+        var tmp = cloned[i];
+        cloned[i] = cloned[j];
+        cloned[j] = tmp;
+      }
+      return cloned;
+    }
+
+    function buildPreviewFallbackOrders() {
+      var day = String(Math.floor(Math.random() * 27) + 1).padStart(2, '0');
+      var month = String(Math.floor(Math.random() * 12) + 1).padStart(2, '0');
+      return [
+        {
+          order_number: '#10' + String(Math.floor(Math.random() * 900) + 100),
+          status_text: T.status_paid,
+          status_class: 'success',
+          financial_status: 'paid',
+          fulfillment_status: T.fulfill_partial,
+          fulfillment_status_raw: 'partial',
+          created_at: day + '/' + month + '/2026 10:15',
+          subtotal_price: '2.200.000₫',
+          total_price: '2.450.000₫',
+          total_discounts: '50.000₫',
+          gateway: 'COD',
+          customer_name: 'Preview Customer',
+          phone: '0901234567',
+          email: 'preview@f1genz.dev',
+          shipping_address: '123 Nguyen Hue, Quan 1, TP.HCM',
+          line_items: [
+            {
+              title: 'Fender Player Stratocaster',
+              variant_title: 'Sunburst',
+              sku: 'FEN-001',
+              variant_id: 1061514693,
+              price: '1.950.000₫',
+              quantity: 1,
+              image: 'https://dummyimage.com/96x96/e2e8f0/64748b.png&text=F1',
+            },
+            {
+              title: 'Ernie Ball Slinky',
+              variant_title: '10-46',
+              sku: 'EB-2221',
+              variant_id: 1061514629,
+              price: '250.000₫',
+              quantity: 2,
+              image: 'https://dummyimage.com/96x96/e2e8f0/64748b.png&text=E2',
+            },
+          ],
+          tracking: [{ carrier: 'GHTK', tracking_number: 'S22.500123', tracking_url: '#' }],
+          note: 'Preview mode',
+        },
+      ];
+    }
+
+    btn.addEventListener('click', function () {
+      var phone = normalizePhone(phoneEl.value),
+        code = codeEl.value.trim();
+
+      if (isPreviewMode()) {
+        setLoading(true);
+        setTimeout(function () {
+          setLoading(false);
+          hideCaptcha();
+          if (!allOrders || allOrders.length === 0) {
+            allOrders = buildPreviewFallbackOrders();
+          } else {
+            allOrders = randomizeOrders(allOrders);
+          }
+          curPage = 1;
+          renderPage();
+        }, 120);
+        return;
+      }
+
+      if ((lookupMethod === 'phone' || lookupMethod === 'phone_and_code' || activeTab === 'phone') && !phone) {
+        showErr(T.err_phone);
+        return;
+      }
+      if ((lookupMethod === 'order_code' || lookupMethod === 'phone_and_code' || activeTab === 'code') && !code) {
+        showErr(T.err_code);
+        return;
+      }
+      setLoading(true);
+      var body = {};
+      if (lookupMethod === 'phone_and_code') {
+        body.phone = phone;
+        body.order_code = code;
+      } else if (lookupMethod === 'phone') {
+        body.phone = phone;
+      } else if (lookupMethod === 'order_code') {
+        body.order_code = code;
+      } else if (activeTab === 'phone') {
+        body.phone = phone;
+      } else {
+        body.order_code = code;
+      }
+      body.shop = getPublicShop();
+      if (captchaToken) body.captcha_token = captchaToken;
+      fetch(API + '/api/order/lookup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Store-Origin': getStoreOrigin() },
+        body: JSON.stringify(body),
+      })
+        .then(function (r) {
+          if (r.status === 429) {
+            setLoading(false);
+            showErr(T.err_rate_limit);
+            throw 'rate_limit';
+          }
+          if (r.status === 401) {
+            setLoading(false);
+            showErr(T.err_auth);
+            throw 'auth';
+          }
+          if (r.status >= 500) {
+            setLoading(false);
+            showErr(T.err_server);
+            throw 'server';
+          }
+          return r.json();
+        })
+        .then(function (d) {
+          if (!d) return;
+          setLoading(false);
+          if (d.success && d.orders && d.orders.length > 0) {
+            allOrders = d.orders;
+            hideCaptcha();
+            curPage = 1;
+            renderPage();
+          } else if (d.require_captcha || d.error === 'captcha_required') {
+            renderCaptcha(d.message);
+          } else showErr(d.message || T.err_not_found);
+        })
+        .catch(function (e) {
+          if (e === 'rate_limit' || e === 'auth' || e === 'server') return;
+          setLoading(false);
+          showErr(T.err_network);
+        });
+    });
+
+    function allowPreviewMessage(e) {
+      var cfg = window.__f1gConfig || {};
+      if (cfg.preview_enabled !== true) return false;
+      if (e.source !== window.parent) return false;
+      try {
+        return document.referrer ? e.origin === new URL(document.referrer).origin : true;
+      } catch (err) {
+        return true;
+      }
+    }
+
+    // Listen for mock data from dashboard preview (postMessage)
+    window.addEventListener('message', function (e) {
+      if (!allowPreviewMessage(e)) return;
+      if (e.data && e.data.type === 'f1g_preview_orders') {
+        allOrders = e.data.orders || [];
+        curPage = 1;
+        renderPage();
+      }
+      if (e.data && e.data.type === 'f1g_preview_config') {
+        applyConfig(e.data.config || {});
+      }
+    });
+
+    function setLoading(on) {
+      btn.disabled = on;
+      btnTxt.textContent = on ? T.btn_loading : T.btn_search;
+      btnSp.style.display = on ? 'block' : 'none';
+      if (on) {
+        errEl.style.display = 'none';
+      }
+    }
+
+    function renderPage() {
+      var totalPages = Math.ceil(allOrders.length / perPage);
+      var start = (curPage - 1) * perPage;
+      var pageOrders = allOrders.slice(start, start + perPage);
+      var h = '';
+      pageOrders.forEach(function (o, i) {
+        h += renderOrder(o, i, start + i);
+      });
+      listEl.innerHTML = h;
+      listEl.style.display = 'block';
+      emptyEl.style.display = 'none';
+      errEl.style.display = 'none';
+      bindOrderActions();
+
+      // Pagination
+      if (totalPages > 1) {
+        var pg = '';
+        for (var p = 1; p <= totalPages; p++) {
+          pg +=
+            '<button class="f1g-ot__page' +
+            (p === curPage ? ' f1g-ot__page--on' : '') +
+            '" data-p="' +
+            p +
+            '">' +
+            p +
+            '</button>';
+        }
+        pagingEl.innerHTML = pg;
+        pagingEl.style.display = 'flex';
+        pagingEl.querySelectorAll('.f1g-ot__page').forEach(function (b) {
+          b.addEventListener('click', function () {
+            curPage = Number(b.dataset.p);
+            renderPage();
+          });
+        });
+      } else {
+        pagingEl.style.display = 'none';
+      }
+    }
+
+    function toPositiveInt(value) {
+      var parsed = Number(value);
+      if (!Number.isFinite(parsed) || parsed <= 0) return 0;
+      return Math.floor(parsed);
+    }
+
+    function getStoreBaseUrl(cfg) {
+      try {
+        if (isFramed() && document.referrer) return new URL(document.referrer).origin;
+      } catch (e) {}
+      if (cfg && cfg.store_origin) return cfg.store_origin.replace(/\/+$/, '');
+      try {
+        if (document.referrer) return new URL(document.referrer).origin;
+      } catch (e) {}
+      return window.location.origin.replace(/\/+$/, '');
+    }
+
+    function getRebuyItems(order) {
+      if (!order || !Array.isArray(order.line_items)) return [];
+      var qtyByVariant = {};
+      order.line_items.forEach(function (item) {
+        var variantId = toPositiveInt(item.variant_id);
+        var qty = toPositiveInt(item.quantity) || 1;
+        if (!variantId) return;
+        var key = String(variantId);
+        qtyByVariant[key] = (qtyByVariant[key] || 0) + qty;
+      });
+      return Object.keys(qtyByVariant).map(function (variantId) {
+        return { id: Number(variantId), quantity: qtyByVariant[variantId] };
+      });
+    }
+
+    function navigateToStore(url) {
+      try {
+        if (window.top && window.top !== window) {
+          window.top.location.href = url;
+          return;
+        }
+      } catch (e) {}
+      window.location.href = url;
+    }
+
+    function addSingleItemToCart(base, item) {
+      var body = new URLSearchParams();
+      body.set('id', String(item.id));
+      body.set('quantity', String(item.quantity || 1));
+      return fetch(base + '/cart/add.js', {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json, text/javascript, */*; q=0.01',
+          'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+          'X-Requested-With': 'XMLHttpRequest',
+        },
+        credentials: 'include',
+        body: body.toString(),
+      }).then(function (res) {
+        if (!res.ok) throw new Error('add_to_cart_failed');
+        return res.json();
+      });
+    }
+
+    function isFramed() {
+      try {
+        return window.parent && window.parent !== window;
+      } catch (e) {
+        return false;
+      }
+    }
+
+    function normalizeOrigin(value) {
+      if (!value) return '';
+      try {
+        return new URL(String(value)).origin.replace(/\/+$/, '');
+      } catch (e) {
+        return '';
+      }
+    }
+
+    function getAllowedStoreOrigins(cfg) {
+      var origins = [];
+      if (cfg && cfg.store_origin) origins.push(normalizeOrigin(cfg.store_origin));
+      if (cfg && Array.isArray(cfg.store_origins)) {
+        cfg.store_origins.forEach(function (origin) {
+          origins.push(normalizeOrigin(origin));
+        });
+      }
+      return origins.filter(function (origin, index, list) {
+        return origin && list.indexOf(origin) === index;
+      });
+    }
+
+    function getParentOrigin(cfg) {
+      var allowedOrigins = getAllowedStoreOrigins(cfg);
+      try {
+        if (document.referrer) {
+          var referrerOrigin = new URL(document.referrer).origin.replace(/\/+$/, '');
+          if (!allowedOrigins.length || allowedOrigins.indexOf(referrerOrigin) !== -1) {
+            return referrerOrigin;
+          }
+        }
+      } catch (e) {}
+      return allowedOrigins[0] || '';
+    }
+
+    function requestParentAddToCart(items) {
+      var cfg = window.__f1gConfig || {};
+      var parentOrigin = getParentOrigin(cfg);
+      if (cfg.preview_enabled === true || !isFramed() || !parentOrigin) {
+        return Promise.reject(new Error('bridge_unavailable'));
+      }
+
+      return new Promise(function (resolve, reject) {
+        var requestId = 'f1g_rebuy_' + Date.now() + '_' + Math.random().toString(16).slice(2);
+        var ackTimer;
+        var doneTimer;
+
+        function cleanup() {
+          clearTimeout(ackTimer);
+          clearTimeout(doneTimer);
+          window.removeEventListener('message', onMessage);
+        }
+
+        function onMessage(event) {
+          if (event.origin !== parentOrigin) return;
+          var data = event.data || {};
+          if (data.requestId !== requestId) return;
+
+          if (data.type === 'f1g_rebuy_add_to_cart_ack') {
+            clearTimeout(ackTimer);
+            doneTimer = setTimeout(function () {
+              cleanup();
+              reject(new Error('bridge_timeout'));
+            }, 20000);
+            return;
+          }
+
+          if (data.type === 'f1g_rebuy_add_to_cart_done') {
+            cleanup();
+            if (data.success === true) resolve();
+            else reject(new Error(data.message || 'add_to_cart_failed'));
+          }
+        }
+
+        window.addEventListener('message', onMessage);
+        ackTimer = setTimeout(function () {
+          cleanup();
+          reject(new Error('bridge_unavailable'));
+        }, 1200);
+        window.parent.postMessage(
+          {
+            type: 'f1g_rebuy_add_to_cart',
+            requestId: requestId,
+            items: items,
+          },
+          parentOrigin,
+        );
+      });
+    }
+
+    function addRebuyItemsToCart(base, items) {
+      return requestParentAddToCart(items).catch(function (error) {
+        if (!error || error.message !== 'bridge_unavailable') throw error;
+        return items.reduce(function (promise, item) {
+          return promise.then(function () {
+            return addSingleItemToCart(base, item);
+          });
+        }, Promise.resolve());
+      });
+    }
+
+    function finishRebuy(base) {
+      var cfg = window.__f1gConfig || {};
+      if (cfg.preview_enabled === true) {
+        showErr('Preview không thêm sản phẩm vào giỏ hàng thật.');
+        return;
+      }
+      navigateToStore(base + '/cart');
+    }
+
+    function getRebuyErrorMessage(error) {
+      if (error && error.message === 'bridge_timeout') {
+        return 'Thêm sản phẩm mất quá lâu. Vui lòng thử lại.';
+      }
+      return 'Không thể thêm sản phẩm vào giỏ hàng. Vui lòng thử lại.';
+    }
+
+    function bindOrderActions() {
+      listEl.querySelectorAll('[data-rebuy-index]').forEach(function (btnNode) {
+        btnNode.addEventListener('click', function () {
+          var idx = Number(btnNode.getAttribute('data-rebuy-index'));
+          var order = allOrders[idx];
+          var items = getRebuyItems(order);
+          if (!items.length) {
+            showErr('Đơn hàng này chưa có biến thể hợp lệ để mua lại.');
+            return;
+          }
+          var cfg = window.__f1gConfig || {};
+          var base = getStoreBaseUrl(cfg);
+          btnNode.disabled = true;
+          addRebuyItemsToCart(base, items)
+            .then(function () {
+              finishRebuy(base);
+            })
+            .catch(function (error) {
+              showErr(getRebuyErrorMessage(error));
+            })
+            .finally(function () {
+              btnNode.disabled = false;
+            });
+        });
+      });
+    }
+
+    function renderOrder(o, idx, orderIndex) {
+      var cfg = window.__f1gConfig || {};
+      var vf = cfg.visible_fields || [
+        'order_number',
+        'status',
+        'created_at',
+        'total_price',
+        'fulfillment_status',
+        'line_items',
+        'phone',
+        'email',
+        'shipping_address',
+      ];
+      function has(f) {
+        return vf.indexOf(f) >= 0;
+      }
+
+      // Status translation helpers
+      var statusI18n = {
+        paid: T.status_paid,
+        pending: T.status_pending,
+        refunded: T.status_refunded,
+        voided: T.status_voided,
+        partially_paid: T.status_partial_paid,
+        partially_refunded: T.status_partial_refund,
+      };
+      var fulfillI18n = {
+        fulfilled: T.fulfill_fulfilled,
+        partial: T.fulfill_partial,
+        notfulfilled: T.fulfill_unfulfilled,
+      };
+      function translateStatus(raw, fallback) {
+        return statusI18n[raw] || fallback || raw;
+      }
+      function translateFulfill(raw, fallback) {
+        return fulfillI18n[raw] || fallback || raw;
+      }
+
+      // Masking helpers
+      function maskPhone(p) {
+        if (!p || p.length < 7) return p;
+        return p.slice(0, 4) + '***' + p.slice(-3);
+      }
+      function maskEmail(e) {
+        if (!e) return e;
+        var at = e.indexOf('@');
+        if (at < 1) return e;
+        return e[0] + '***' + e.slice(at);
+      }
+      function maskAddr(a) {
+        if (!a || a.length < 15) return a;
+        var comma = a.indexOf(',');
+        if (comma > 0) return '***' + a.slice(comma);
+        return a.slice(0, 5) + '***';
+      }
+      var doMaskPhone = cfg.mask_phone !== false;
+      var doMaskEmail = cfg.mask_email !== false;
+      var doMaskAddr = cfg.mask_address !== false;
+
+      var h = '<div class="f1g-ot__card" style="animation-delay:' + idx * 80 + 'ms">';
+
+      // Header — always show order_number and status
+      h += '<div class="f1g-ot__card-head">';
+      if (has('order_number')) h += '<span class="f1g-ot__order-num">' + esc(o.order_number) + '</span>';
+      if (has('status'))
+        h +=
+          '<span class="f1g-ot__badge f1g-ot__badge--' +
+          esc(o.status_class || 'pending') +
+          '">' +
+          esc(translateStatus(o.financial_status, o.status_text)) +
+          '</span>';
+      h += '</div><div class="f1g-ot__card-body">';
+
+      // Timeline stepper (shown if fulfillment_status visible)
+      if (has('fulfillment_status')) h += renderTimeline(o);
+
+      // Customer section
+      var showCustomer = (has('phone') && o.phone) || (has('email') && o.email) || o.customer_name;
+      if (showCustomer) {
+        h += sepTitle(T.sec_customer);
+        h += '<div class="f1g-ot__info">';
+        if (o.customer_name) h += iCell(T.lbl_name, o.customer_name);
+        if (has('phone') && o.phone) h += iCell(T.lbl_phone, doMaskPhone ? maskPhone(o.phone) : o.phone);
+        if (has('email') && o.email) h += iCell(T.lbl_email, doMaskEmail ? maskEmail(o.email) : o.email);
+        h += '</div>';
+        if (has('shipping_address') && o.shipping_address)
+          h +=
+            '<div class="f1g-ot__info" style="grid-template-columns:1fr;margin-top:.25rem">' +
+            iCell(T.lbl_address, doMaskAddr ? maskAddr(o.shipping_address) : o.shipping_address) +
+            '</div>';
+      }
+
+      // Order details
+      var showDetails = has('created_at') || has('total_price');
+      if (showDetails) {
+        h += sepTitle(T.sec_detail);
+        h += '<div class="f1g-ot__info">';
+        if (has('created_at') && o.created_at) h += iCell(T.lbl_date, o.created_at);
+        if (has('total_price') && o.total_price) h += iCellHtml(T.lbl_total, '<strong>' + esc(o.total_price) + '</strong>');
+        if (has('total_price') && o.subtotal_price) h += iCell(T.lbl_subtotal, o.subtotal_price);
+        if (has('total_price') && o.total_discounts && o.total_discounts !== '0₫')
+          h += iCell(T.lbl_discount, '-' + o.total_discounts);
+        if (o.gateway) h += iCell(T.lbl_payment, o.gateway);
+        h += '</div>';
+      }
+
+      // Products
+      if (has('line_items') && o.line_items && o.line_items.length) {
+        h += sepTitle(T.sec_products + ' (' + o.line_items.length + ')');
+        o.line_items.forEach(function (item) {
+          h += '<div class="f1g-ot__prod">';
+          var itemImageUrl = safeUrl(item.image);
+          if (itemImageUrl)
+            h +=
+              '<img class="f1g-ot__prod-img" src="' +
+              esc(itemImageUrl) +
+              '" alt="' +
+              esc(item.title) +
+              '" loading="lazy" onerror="this.onerror=null;this.style.display=\'none\';if(this.nextElementSibling){this.nextElementSibling.style.display=\'flex\';}"/>' +
+              '<div class="f1g-ot__prod-img-empty" style="display:none">N/A</div>';
+          else h += '<div class="f1g-ot__prod-img-empty">N/A</div>';
+          h += '<div class="f1g-ot__prod-detail"><div class="f1g-ot__prod-name">' + esc(item.title) + '</div>';
+          var meta = [];
+          if (item.variant_title) meta.push(item.variant_title);
+          if (item.sku) meta.push('SKU: ' + item.sku);
+          if (meta.length) h += '<div class="f1g-ot__prod-meta">' + esc(meta.join(' · ')) + '</div>';
+          h +=
+            '</div><div class="f1g-ot__prod-price"><div class="f1g-ot__prod-price-val">' +
+            esc(item.price || '') +
+            '</div>';
+          h += '<div class="f1g-ot__prod-price-qty">x' + esc(item.quantity) + '</div></div></div>';
+        });
+      }
+
+      // Shipping
+      if (has('fulfillment_status') && o.fulfillment_status) {
+        h +=
+          '<div class="f1g-ot__ship"><span class="f1g-ot__ship-lbl">' +
+          esc(T.lbl_tracking) +
+          ':</span><span class="f1g-ot__ship-val">' +
+          esc(translateFulfill(o.fulfillment_status_raw, o.fulfillment_status)) +
+          '</span></div>';
+      }
+      if (has('fulfillment_status') && o.tracking && o.tracking.length) {
+        o.tracking.forEach(function (t) {
+          h +=
+            '<div style="font-size:.78rem;color:#475569;margin-top:.35rem;padding:.3rem .7rem;background:#f8fafc;border-radius:6px">';
+          if (t.carrier) h += '<strong>' + esc(t.carrier) + '</strong> ';
+          if (t.tracking_number) {
+            var trackingUrl = safeUrl(t.tracking_url);
+            h += trackingUrl
+              ? '<a href="' +
+                esc(trackingUrl) +
+                '" target="_blank" rel="noopener" style="color:var(--f1g-primary)">' +
+                esc(t.tracking_number) +
+                '</a>'
+              : esc(t.tracking_number);
+          }
+          h += '</div>';
+        });
+      }
+
+      // Note
+      if (o.note)
+        h +=
+          '<div style="margin-top:.6rem;font-size:.82rem;color:#475569;background:#fffbeb;padding:.5rem .7rem;border-radius:8px;border-left:3px solid #f59e0b">' +
+          esc(o.note) +
+          '</div>';
+
+      var actionButtons = '';
+      if (cfg.rebuy_enabled !== false && getRebuyItems(o).length) {
+        actionButtons +=
+          '<button type="button" class="f1g-ot__action-btn f1g-ot__action-btn--primary" data-rebuy-index="' +
+          esc(orderIndex) +
+          '">' +
+          esc(T.btn_rebuy || 'Buy Again') +
+          '</button>';
+      }
+      if (actionButtons) {
+        h += '<div class="f1g-ot__actions">' + actionButtons + '</div>';
+      }
+
+      h += '</div></div>';
+      return h;
+    }
+
+    function renderTimeline(o) {
+      var steps = [
+        {
+          label: T.step_ordered,
+          icon: '<path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>',
+        },
+        { label: T.step_confirmed, icon: '<path d="M5 13l4 4L19 7"/>' },
+        {
+          label: T.step_shipping,
+          icon: '<path d="M13 16V6a1 1 0 00-1-1H4a1 1 0 00-1 1v10l4-2 4 2"/><path d="M20 16V9a1 1 0 00-1-1h-3l-3 3v5l4-2 3 2"/>',
+        },
+        { label: T.step_delivered, icon: '<path d="M20 6L9 17l-5-5"/>' },
+      ];
+      var fs = o.fulfillment_status_raw || o.fulfillment_status || '';
+      var ps = o.status_class || '';
+      var activeIdx = 0;
+      if (ps === 'cancelled') activeIdx = -1;
+      else if (fs === 'fulfilled') activeIdx = 3;
+      else if (fs === 'partial') activeIdx = 2;
+      else if (ps === 'success') activeIdx = 1;
+      else activeIdx = 0;
+
+      var barW = activeIdx > 0 ? (activeIdx / (steps.length - 1)) * 100 + '%' : '0%';
+      var h = '<div class="f1g-ot__timeline"><div class="f1g-ot__timeline-bar" style="width:' + barW + '"></div>';
+      steps.forEach(function (s, i) {
+        var cls = 'f1g-ot__step';
+        if (i < activeIdx) cls += ' f1g-ot__step--done';
+        else if (i === activeIdx) cls += ' f1g-ot__step--active';
+        h +=
+          '<div class="' +
+          cls +
+          '"><div class="f1g-ot__step-dot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+          s.icon +
+          '</svg></div>';
+        h += '<span class="f1g-ot__step-label">' + esc(s.label) + '</span></div>';
+      });
+      h += '</div>';
+      return h;
+    }
+
+    function sepTitle(t) {
+      return '<div class="f1g-ot__sep">' + esc(t) + '</div>';
+    }
+    function iCell(l, v) {
+      return (
+        '<div><div class="f1g-ot__info-lbl">' + esc(l) + '</div><div class="f1g-ot__info-val">' + esc(v) + '</div></div>'
+      );
+    }
+    function iCellHtml(l, html) {
+      return (
+        '<div><div class="f1g-ot__info-lbl">' + esc(l) + '</div><div class="f1g-ot__info-val">' + html + '</div></div>'
+      );
+    }
+    function getCaptchaWrap() {
+      var wrap = document.getElementById('f1g-captcha');
+      if (wrap) return wrap;
+      wrap = document.createElement('div');
+      wrap.id = 'f1g-captcha';
+      wrap.className = 'f1g-ot__field';
+      wrap.style.display = 'none';
+      btn.parentNode.insertBefore(wrap, errEl);
+      return wrap;
+    }
+    function loadTurnstile(cb) {
+      if (window.turnstile) {
+        cb();
+        return;
+      }
+      var existing = document.getElementById('f1g-turnstile-js');
+      if (existing) {
+        existing.addEventListener('load', cb);
+        return;
+      }
+      var script = document.createElement('script');
+      script.id = 'f1g-turnstile-js';
+      script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
+      script.async = true;
+      script.defer = true;
+      script.addEventListener('load', cb);
+      document.head.appendChild(script);
+    }
+    function renderCaptcha(message) {
+      var cfg = window.__f1gConfig || {};
+      if (!cfg.turnstile_site_key) {
+        showErr(message || T.err_rate_limit);
+        return;
+      }
+      var wrap = getCaptchaWrap();
+      wrap.style.display = 'block';
+      wrap.innerHTML = '<div id="f1g-captcha-widget"></div>';
+      captchaToken = '';
+      captchaWidgetId = null;
+      loadTurnstile(function () {
+        if (!window.turnstile) return;
+        captchaWidgetId = window.turnstile.render('#f1g-captcha-widget', {
+          sitekey: cfg.turnstile_site_key,
+          callback: function (token) {
+            captchaToken = token;
+            errEl.style.display = 'none';
+          },
+          'expired-callback': function () {
+            captchaToken = '';
+          },
+        });
+      });
+      showErr(message || T.err_rate_limit);
+    }
+    function hideCaptcha() {
+      var wrap = document.getElementById('f1g-captcha');
+      if (wrap) wrap.style.display = 'none';
+      captchaToken = '';
+      captchaWidgetId = null;
+    }
+    function showErr(m) {
+      errMsg.textContent = m;
+      errEl.style.display = 'block';
+      emptyEl.style.display = 'none';
+      listEl.style.display = 'none';
+      pagingEl.style.display = 'none';
+    }
+    function esc(s) {
+      if (!s) return '';
+      var d = document.createElement('div');
+      d.textContent = String(s);
+      return d.innerHTML;
+    }
+    function safeUrl(url) {
+      if (!url) return '';
+      try {
+        var parsed = new URL(String(url), window.location.origin);
+        if (parsed.protocol === 'http:' || parsed.protocol === 'https:') return parsed.href;
+      } catch (e) {}
+      return '';
+    }
+  })();
+</script>

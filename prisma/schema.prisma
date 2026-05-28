@@ -1,0 +1,158 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Shop {
+  id                    String                @id @default(cuid())
+  orgid                 String                @unique
+  orgsub                String?
+  shopDomain            String
+  customDomain          String?
+  accessTokenCiphertext String?
+  accessTokenIv         String?
+  accessTokenTag        String?
+  isActive              Boolean               @default(true)
+  installedAt           DateTime
+  expiresAt             DateTime?
+  status                String                @default("trial")
+  plan                  String                @default("Trial")
+  subscriptionStatus    String?
+  subscriptionUpdatedAt DateTime?
+  subscriptionPayload   Json?
+  createdAt             DateTime              @default(now())
+  updatedAt             DateTime              @updatedAt
+
+  domains               ShopDomain[]
+  settings              ShopSettings?
+  subscription          SubscriptionSnapshot?
+  lookupEvents          LookupEvent[]
+  webhookEvents         WebhookEvent[]
+
+  @@index([shopDomain])
+  @@index([status])
+  @@index([plan])
+}
+
+model AppInstall {
+  id                     String   @id @default(cuid())
+  orgid                  String   @unique
+  orgsub                 String?
+  domain                 String?
+  primaryDomain          String?
+  myharavanDomain        String?
+  accessTokenCiphertext  String?
+  accessTokenIv          String?
+  accessTokenTag         String?
+  refreshTokenCiphertext String?
+  refreshTokenIv         String?
+  refreshTokenTag        String?
+  tokenExpiresAt         DateTime?
+  status                 String   @default("trial")
+  plan                   String?
+  expiresAt              DateTime?
+  installedAt            DateTime?
+  quotaTotal             Int?
+  quotaRemaining         Int?
+  subscriptionStatus     String?
+  subscriptionUpdatedAt  DateTime?
+  metadata               Json?
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  @@index([status])
+  @@index([plan])
+  @@index([tokenExpiresAt])
+}
+
+model ShopDomain {
+  id        String   @id @default(cuid())
+  shopId    String
+  domain    String   @unique
+  kind      String   @default("alias")
+  createdAt DateTime @default(now())
+
+  shop      Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@index([shopId])
+}
+
+model ShopSettings {
+  id        String   @id @default(cuid())
+  shopId    String   @unique
+  orgid     String   @unique
+  settings  Json
+  version   Int      @default(1)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  shop      Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+}
+
+model SubscriptionSnapshot {
+  id        String    @id @default(cuid())
+  shopId    String?   @unique
+  orgid     String    @unique
+  status    String
+  plan      String
+  isActive  Boolean   @default(false)
+  expiresAt DateTime?
+  syncedAt  DateTime
+  payload   Json?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  shop      Shop?     @relation(fields: [shopId], references: [id], onDelete: SetNull)
+
+  @@index([status])
+  @@index([plan])
+  @@index([syncedAt])
+}
+
+model LookupEvent {
+  id            String   @id @default(cuid())
+  shopId        String?
+  orgid         String
+  ipHash        String?
+  phoneHash     String?
+  orderCodeHash String?
+  status        String
+  resultCount   Int      @default(0)
+  durationMs    Int?
+  cacheStatus   String?
+  originHost    String?
+  createdAt     DateTime @default(now())
+
+  shop          Shop?    @relation(fields: [shopId], references: [id], onDelete: SetNull)
+
+  @@index([orgid, createdAt])
+  @@index([orgid, status, createdAt])
+  @@index([phoneHash])
+  @@index([orderCodeHash])
+}
+
+model WebhookEvent {
+  id          String    @id @default(cuid())
+  shopId      String?
+  orgid       String?
+  topic       String
+  payloadHash String
+  payload     Json?
+  headers     Json?
+  status      String    @default("received")
+  attempts    Int       @default(0)
+  error       String?
+  receivedAt  DateTime  @default(now())
+  processedAt DateTime?
+
+  shop        Shop?     @relation(fields: [shopId], references: [id], onDelete: SetNull)
+
+  @@unique([topic, orgid, payloadHash])
+  @@index([orgid, topic, receivedAt])
+  @@index([orgid, status, receivedAt])
+  @@index([status, receivedAt])
+}
