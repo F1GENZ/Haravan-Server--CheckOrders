@@ -150,9 +150,17 @@ export class LookupController {
 (function () {
   var frameId = ${JSON.stringify(frameId)};
   var script = document.currentScript;
-  var src = new URL(${JSON.stringify(widgetPath)}, script ? script.src : window.location.href).href;
+  var scriptUrl = new URL(script ? script.src : window.location.href, window.location.href);
+  var embedMode = (scriptUrl.searchParams.get("mode") || "").trim().toLowerCase();
+  var srcUrl = new URL(${JSON.stringify(widgetPath)}, scriptUrl.href);
+  if (embedMode === "popup" || embedMode === "trigger" || embedMode === "inline") {
+    srcUrl.searchParams.set("launcher", embedMode);
+  }
+  var src = srcUrl.href;
   var widgetUrl = ${JSON.stringify(widgetUrl)};
-  var displayMode = ${JSON.stringify(displayMode)};
+  var displayMode = (embedMode === "popup" || embedMode === "trigger")
+    ? embedMode
+    : ${JSON.stringify(displayMode)};
   var triggerAction = ${JSON.stringify(triggerAction)};
   var triggerLinkUrl = ${JSON.stringify(triggerLinkUrl)};
   if (document.getElementById(frameId)) return;

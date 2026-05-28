@@ -748,6 +748,7 @@
     var activeTab = 'phone';
     var lookupMethod = 'phone_and_code';
     var displayMode = 'inline';
+    var launcherMode = '';
     var captchaToken = '';
     var captchaWidgetId = null;
 
@@ -866,6 +867,16 @@
 
     var T = I18N.vi; // default language
 
+    function getLauncherMode() {
+      try {
+        var params = new URLSearchParams(window.location.search || '');
+        var raw = String(params.get('launcher') || '').trim().toLowerCase();
+        return raw === 'popup' || raw === 'trigger' || raw === 'inline' ? raw : '';
+      } catch (e) {
+        return '';
+      }
+    }
+
     // ─── Apply config ───
     function applyConfig(cfg) {
       if (!cfg) return;
@@ -877,7 +888,8 @@
       var lang = urlLang || 'vi';
       T = Object.assign({}, I18N[lang] || I18N.vi, sanitizeWidgetTexts(cfg.widget_texts));
       applyLang();
-      applyDisplayMode(cfg.widget_display_mode || 'inline');
+      launcherMode = getLauncherMode();
+      applyDisplayMode(launcherMode || cfg.widget_display_mode || 'inline');
 
       // Theme
       var r = root.style;
