@@ -406,7 +406,8 @@ export class LookupService {
     order: Record<string, unknown>,
   ): Record<string, unknown> {
     const financialStatus = textValue(order.financial_status) || 'pending';
-    const fulfillmentStatus = textValue(order.fulfillment_status) || null;
+    const rawFulfillmentStatus =
+      textValue(order.fulfillment_status)?.toLowerCase() || '';
 
     const statusMap: Record<string, { text: string; class: string }> = {
       paid: { text: 'Đã thanh toán', class: 'success' },
@@ -419,6 +420,7 @@ export class LookupService {
 
     const fulfillmentMap: Record<string, string> = {
       fulfilled: 'Đã giao hàng',
+      shipping: 'Đang giao hàng',
       partial: 'Giao một phần',
       notfulfilled: 'Chưa giao hàng',
       cancelled: 'Đã hủy giao hàng',
@@ -567,6 +569,7 @@ export class LookupService {
     const trackingInfo = trackingInfoFromFulfillments.length
       ? trackingInfoFromFulfillments
       : trackingInfoFromShippingLines;
+    const hasTrackingInfo = trackingInfo.length > 0;
 
     // ─── Discounts ───
     const discountCodes = order.discount_codes as
@@ -589,6 +592,27 @@ export class LookupService {
         value: str(a.value) || '',
       })) || [];
 
+    const cancelled =
+      Boolean(order.cancelled_at) ||
+      ['cancelled', 'canceled', 'restocked', 'voided'].includes(
+        rawFulfillmentStatus,
+      );
+    const normalizedFulfillmentStatus = cancelled
+      ? 'cancelled'
+      : ['fulfilled', 'delivered', 'completed', 'success'].includes(
+            rawFulfillmentStatus,
+          )
+        ? 'fulfilled'
+        : ['partial', 'partially_fulfilled', 'partiallyfulfilled'].includes(
+              rawFulfillmentStatus,
+            )
+          ? 'partial'
+          : ['shipping', 'shipped', 'in_transit', 'intransit', 'out_for_delivery', 'outfordelivery'].includes(
+                rawFulfillmentStatus,
+              ) || hasTrackingInfo
+            ? 'shipping'
+            : 'notfulfilled';
+
     return {
       // Order basics
       order_number:
@@ -598,10 +622,8 @@ export class LookupService {
       status_class: status.class,
       financial_status: financialStatus,
       fulfillment_status:
-        fulfillmentMap[fulfillmentStatus || 'notfulfilled'] ||
-        fulfillmentStatus ||
-        'Chưa giao hàng',
-      fulfillment_status_raw: fulfillmentStatus || 'notfulfilled',
+        fulfillmentMap[normalizedFulfillmentStatus] || 'Chưa giao hàng',
+      fulfillment_status_raw: normalizedFulfillmentStatus,
 
       // Dates
       created_at: fmtDate(order.created_at),
