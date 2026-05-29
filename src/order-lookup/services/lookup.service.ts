@@ -421,6 +421,9 @@ export class LookupService {
       fulfilled: 'Đã giao hàng',
       partial: 'Giao một phần',
       notfulfilled: 'Chưa giao hàng',
+      cancelled: 'Đã hủy giao hàng',
+      canceled: 'Đã hủy giao hàng',
+      restocked: 'Đã hủy giao hàng',
     };
 
     const status = statusMap[financialStatus] || {
@@ -554,7 +557,7 @@ export class LookupService {
     const trackingInfoFromShippingLines =
       shippingLines
         ?.map((line) => ({
-          tracking_number: str(line.code) || str(line.phone),
+          tracking_number: str(line.code),
           tracking_url: str(line.url),
           carrier: str(line.title) || str(line.name),
           status: undefined,

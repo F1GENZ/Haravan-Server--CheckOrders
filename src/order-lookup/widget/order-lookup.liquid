@@ -811,6 +811,7 @@
         fulfill_fulfilled: 'Đã giao hàng',
         fulfill_partial: 'Giao một phần',
         fulfill_unfulfilled: 'Chưa giao hàng',
+        fulfill_cancelled: 'Đã hủy giao hàng',
       },
       en: {
         heading: 'Track Your Order',
@@ -863,6 +864,7 @@
         fulfill_fulfilled: 'Fulfilled',
         fulfill_partial: 'Partially Fulfilled',
         fulfill_unfulfilled: 'Unfulfilled',
+        fulfill_cancelled: 'Shipment cancelled',
       },
     };
 
@@ -1606,6 +1608,8 @@
         fulfilled: T.fulfill_fulfilled,
         partial: T.fulfill_partial,
         notfulfilled: T.fulfill_unfulfilled,
+        cancelled: T.fulfill_cancelled,
+        canceled: T.fulfill_cancelled,
       };
       function translateStatus(raw, fallback) {
         return statusI18n[raw] || fallback || raw;
@@ -1786,7 +1790,7 @@
       var ps = String(o.status_class || '').toLowerCase();
       var activeIdx = 0;
       var cancelled = Boolean(o.cancelled_at) || fs.indexOf('cancel') >= 0 || fs.indexOf('void') >= 0;
-      if (cancelled || ps === 'cancelled') activeIdx = 0;
+      if (cancelled || ps === 'cancelled') activeIdx = 1;
       else if (['fulfilled', 'delivered', 'shipped'].indexOf(fs) >= 0) activeIdx = 3;
       else if (['partial', 'partiallyfulfilled', 'shipping', 'intransit'].indexOf(fs.replace(/[_\\s-]/g, '')) >= 0) activeIdx = 2;
       else if (ps === 'success' || fs === 'confirmed' || fs === 'paid') activeIdx = 1;
