@@ -145,6 +145,7 @@ export class LookupController {
     const triggerAction =
       settings.widget_trigger_action === 'link' ? 'link' : 'modal';
     const triggerLinkUrl = String(settings.widget_trigger_link_url || '').trim();
+    const widgetEnabled = settings.widget_enabled !== false;
 
     const js = `
 (function () {
@@ -163,6 +164,7 @@ export class LookupController {
     : ${JSON.stringify(displayMode)};
   var triggerAction = ${JSON.stringify(triggerAction)};
   var triggerLinkUrl = ${JSON.stringify(triggerLinkUrl)};
+  var widgetEnabled = ${JSON.stringify(widgetEnabled)};
   if (document.getElementById(frameId)) return;
   var frameLoaded = false;
   var pendingOpen = false;
@@ -237,6 +239,7 @@ export class LookupController {
     if (evt && evt.preventDefault) evt.preventDefault();
     if (evt && evt.stopPropagation) evt.stopPropagation();
     if (displayMode !== "trigger") return;
+    if (!widgetEnabled) return;
     if (triggerAction === "link") {
       window.location.href = triggerLinkUrl || widgetUrl;
       return;
@@ -254,6 +257,21 @@ export class LookupController {
     }
   }
 
+  function syncTriggerButtons(enabled) {
+    var els = document.querySelectorAll("[data-f1g-checkorders-open]");
+    els.forEach(function (el) {
+      var target = (el.getAttribute("data-f1g-checkorders-open") || "").trim();
+      if (target && target !== ${JSON.stringify(publicShop)}) return;
+      if (!enabled) {
+        el.setAttribute("hidden", "hidden");
+        if (el.tagName === "BUTTON") el.disabled = true;
+      } else {
+        el.removeAttribute("hidden");
+        if (el.tagName === "BUTTON") el.disabled = false;
+      }
+    });
+  }
+
   window.F1GENZCheckOrders = window.F1GENZCheckOrders || {};
   window.F1GENZCheckOrders[${JSON.stringify(publicShop)}] = {
     open: function () { openWidget(); },
@@ -268,6 +286,7 @@ export class LookupController {
 
   if (displayMode === "trigger") {
     setPopupFrame(false);
+    syncTriggerButtons(widgetEnabled);
     document.addEventListener("click", function (evt) {
       var el = evt.target && evt.target.closest
         ? evt.target.closest("[data-f1g-checkorders-open]")
@@ -435,6 +454,7 @@ export class LookupController {
       widget_trigger_action: settings.widget_trigger_action || 'modal',
       widget_trigger_link_url: settings.widget_trigger_link_url || '',
       theme_color: settings.theme_color || '#4361ee',
+      theme_text_color: settings.theme_text_color || '#ffffff',
       widget_texts: settings.widget_texts || {},
       rebuy_enabled: settings.rebuy_enabled !== false,
       public_shop: publicShop,

@@ -35,6 +35,7 @@ export interface StoreSettings {
   mask_email: boolean;
   mask_address: boolean;
   theme_color: string;
+  theme_text_color: string;
   widget_texts: Record<string, string>;
   rebuy_enabled: boolean;
 }
@@ -89,6 +90,7 @@ const DEFAULT_SETTINGS: StoreSettings = {
   mask_email: true,
   mask_address: true,
   theme_color: '#4361ee',
+  theme_text_color: '#ffffff',
   widget_texts: DEFAULT_WIDGET_TEXTS,
   rebuy_enabled: true,
 };
@@ -432,15 +434,14 @@ export class StoreService {
     )
       .trim()
       .slice(0, 500);
+    merged.theme_text_color = /^#[0-9a-fA-F]{6}$/.test(
+      String(merged.theme_text_color || ''),
+    )
+      ? String(merged.theme_text_color)
+      : '#ffffff';
 
     // One-time migration for existing stores
     let needsSave = false;
-
-    // Add line_items to visible_fields if missing
-    if (!merged.visible_fields.includes('line_items')) {
-      merged.visible_fields.push('line_items');
-      needsSave = true;
-    }
 
     if (
       !durableSettings.widget_texts ||
@@ -516,6 +517,11 @@ export class StoreService {
         partial.widget_trigger_link_url === undefined
           ? current.widget_trigger_link_url
           : String(partial.widget_trigger_link_url || '').trim().slice(0, 500),
+      theme_text_color:
+        partial.theme_text_color &&
+        /^#[0-9a-fA-F]{6}$/.test(String(partial.theme_text_color))
+          ? String(partial.theme_text_color)
+          : current.theme_text_color,
     };
     delete (updated as StoreSettings & { branded_links?: unknown })
       .branded_links;

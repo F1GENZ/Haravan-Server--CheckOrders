@@ -111,6 +111,32 @@ describe('HaravanOrderService lookup filtering', () => {
     expect(result[0]?.id).toBe(1);
   });
 
+  it('matches +84 formatted phone numbers against normalized local input', async () => {
+    mockedAxios.get.mockResolvedValueOnce({
+      data: {
+        orders: [
+          {
+            id: 1,
+            name: '#10001',
+            order_number: 10001,
+            customer: { phone: '+84906876467' },
+          },
+        ],
+      },
+    });
+
+    const result = await createService().lookupOrders(
+      'access-token',
+      'store-1',
+      '0906876467',
+      undefined,
+      5,
+    );
+
+    expect(result).toHaveLength(1);
+    expect(result[0]?.id).toBe(1);
+  });
+
   it('caches full filtered results before applying max order limit', async () => {
     const service = createService();
     mockedAxios.get.mockResolvedValueOnce({

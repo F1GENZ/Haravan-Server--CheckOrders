@@ -118,7 +118,7 @@ describe('LookupService storefront origin handling', () => {
       'fresh-token',
       'org-1',
       '0901234567',
-      '#10001',
+      '10001',
       5,
     ]);
   });
@@ -164,7 +164,7 @@ describe('LookupService storefront origin handling', () => {
       'fresh-token',
       'org-1',
       '0901234567',
-      '#10001',
+      '10001',
       5,
     ]);
   });

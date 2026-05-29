@@ -36,7 +36,7 @@
             placeholder='0901 234 567'
             class='f1g-ot__input'
             autocomplete='tel'
-            maxlength='12'
+            maxlength='20'
           >
         </div>
         <div id='f1g-code-wrap' class='f1g-ot__field' style='display:none'>
@@ -88,6 +88,7 @@
   :root {
     --f1g-primary: #4361ee;
     --f1g-primary-dark: #3651d4;
+    --f1g-on-primary: #ffffff;
     --f1g-bg: #f8fafc;
     --f1g-card: #fff;
     --f1g-border: #e8e8ee;
@@ -137,7 +138,7 @@
     border: 0;
     border-radius: 999px;
     background: var(--f1g-primary);
-    color: #fff;
+    color: var(--f1g-on-primary);
     box-shadow: 0 14px 34px rgba(15, 23, 42, 0.24);
     font-family: var(--f1g-font);
     font-size: 0.9rem;
@@ -302,7 +303,7 @@
     width: 100%;
     padding: 0.75rem;
     background: var(--f1g-primary);
-    color: #fff;
+    color: var(--f1g-on-primary);
     border: none;
     border-radius: 10px;
     font-size: 0.92rem;
@@ -489,7 +490,7 @@
   .f1g-ot__step-dot svg {
     width: 14px;
     height: 14px;
-    color: #fff;
+    color: var(--f1g-on-primary);
   }
   .f1g-ot__step--done .f1g-ot__step-dot {
     background: var(--f1g-success);
@@ -638,11 +639,11 @@
   .f1g-ot__action-btn--primary {
     background: var(--f1g-primary);
     border-color: var(--f1g-primary);
-    color: #fff;
+    color: var(--f1g-on-primary);
   }
   .f1g-ot__action-btn--primary:hover {
     opacity: 0.9;
-    color: #fff;
+    color: var(--f1g-on-primary);
   }
 
   /* Shipping */
@@ -687,7 +688,7 @@
   }
   .f1g-ot__page--on {
     background: var(--f1g-primary);
-    color: #fff;
+    color: var(--f1g-on-primary);
     border-color: var(--f1g-primary);
   }
 
@@ -877,6 +878,20 @@
       }
     }
 
+    function applyRequiredMarkers() {
+      var lbls = root.querySelectorAll('.f1g-ot__label');
+      if (lbls[0]) lbls[0].textContent = T.label_phone;
+      if (lbls[1]) lbls[1].textContent = T.label_code;
+      if (lookupMethod === 'phone_and_code') {
+        if (lbls[0]) lbls[0].textContent += ' *';
+        if (lbls[1]) lbls[1].textContent += ' *';
+      } else if (lookupMethod === 'phone') {
+        if (lbls[0]) lbls[0].textContent += ' *';
+      } else if (lookupMethod === 'order_code') {
+        if (lbls[1]) lbls[1].textContent += ' *';
+      }
+    }
+
     // ─── Apply config ───
     function applyConfig(cfg) {
       if (!cfg) return;
@@ -896,6 +911,9 @@
       if (cfg.theme_color) {
         r.setProperty('--f1g-primary', cfg.theme_color);
         r.setProperty('--f1g-primary-dark', cfg.theme_color);
+      }
+      if (cfg.theme_text_color) {
+        r.setProperty('--f1g-on-primary', cfg.theme_text_color);
       }
 
       // Disabled state
@@ -930,6 +948,8 @@
         codeW.style.display = activeTab === 'code' ? 'block' : 'none';
       }
 
+      applyRequiredMarkers();
+
       if (allOrders.length > 0) renderPage();
     }
 
@@ -953,6 +973,7 @@
       if (et) et.textContent = T.empty_title;
       if (ed) ed.textContent = T.empty_desc;
       if (popupBtnText) popupBtnText.textContent = T.popup_btn;
+      applyRequiredMarkers();
     }
 
     function sanitizeWidgetTexts(value) {
@@ -1002,12 +1023,14 @@
       btnSp.style.display = 'none';
       btnTxt.textContent = T.btn_search;
       if (!enabled) {
+        if (displayMode === 'popup' && popupBtn) popupBtn.style.display = 'none';
         errMsg.textContent = T.disabled_desc;
         errEl.style.display = 'block';
         listEl.style.display = 'none';
         pagingEl.style.display = 'none';
         emptyEl.style.display = 'block';
       } else if (errMsg.textContent === T.disabled_desc) {
+        if (displayMode === 'popup' && popupBtn) popupBtn.style.display = '';
         errEl.style.display = 'none';
       }
     }
@@ -1630,7 +1653,11 @@
       if (has('fulfillment_status')) h += renderTimeline(o);
 
       // Customer section
-      var showCustomer = (has('phone') && o.phone) || (has('email') && o.email) || o.customer_name;
+      var showCustomer =
+        o.customer_name ||
+        (has('phone') && o.phone) ||
+        (has('email') && o.email) ||
+        (has('shipping_address') && o.shipping_address);
       if (showCustomer) {
         h += sepTitle(T.sec_customer);
         h += '<div class="f1g-ot__info">';
@@ -1646,7 +1673,10 @@
       }
 
       // Order details
-      var showDetails = has('created_at') || has('total_price');
+      var showDetails =
+        (has('created_at') && o.created_at) ||
+        (has('total_price') &&
+          (o.total_price || o.subtotal_price || o.total_discounts || o.gateway));
       if (showDetails) {
         h += sepTitle(T.sec_detail);
         h += '<div class="f1g-ot__info">';
@@ -1752,13 +1782,14 @@
         },
         { label: T.step_delivered, icon: '<path d="M20 6L9 17l-5-5"/>' },
       ];
-      var fs = o.fulfillment_status_raw || o.fulfillment_status || '';
-      var ps = o.status_class || '';
+      var fs = String(o.fulfillment_status_raw || o.fulfillment_status || '').toLowerCase();
+      var ps = String(o.status_class || '').toLowerCase();
       var activeIdx = 0;
-      if (ps === 'cancelled') activeIdx = -1;
-      else if (fs === 'fulfilled') activeIdx = 3;
-      else if (fs === 'partial') activeIdx = 2;
-      else if (ps === 'success') activeIdx = 1;
+      var cancelled = Boolean(o.cancelled_at) || fs.indexOf('cancel') >= 0 || fs.indexOf('void') >= 0;
+      if (cancelled || ps === 'cancelled') activeIdx = 0;
+      else if (['fulfilled', 'delivered', 'shipped'].indexOf(fs) >= 0) activeIdx = 3;
+      else if (['partial', 'partiallyfulfilled', 'shipping', 'intransit'].indexOf(fs.replace(/[_\\s-]/g, '')) >= 0) activeIdx = 2;
+      else if (ps === 'success' || fs === 'confirmed' || fs === 'paid') activeIdx = 1;
       else activeIdx = 0;
 
       var barW = activeIdx > 0 ? (activeIdx / (steps.length - 1)) * 100 + '%' : '0%';

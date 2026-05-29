@@ -67,6 +67,11 @@ export class LookupService {
     captchaToken?: string,
     proxyHost?: string,
   ): Promise<LookupResponseDto> {
+    const normalizedPhone = phone ? this.normalizePhone(phone) : undefined;
+    const normalizedOrderCode = orderCode
+      ? String(orderCode).replace(/^#/, '').trim()
+      : undefined;
+
     // 1. Identify store by public shop handle/domain.
     const store = await this.storeService.getStoreByPublicShop(publicShop);
     if (!store || !store.is_active) {
@@ -133,7 +138,11 @@ export class LookupService {
     }
 
     // 3. Validate input against lookup method
-    const validationError = this.validateInput(phone, orderCode, settings);
+    const validationError = this.validateInput(
+      normalizedPhone,
+      normalizedOrderCode,
+      settings,
+    );
     if (validationError) {
       return {
         success: false,
@@ -149,13 +158,13 @@ export class LookupService {
     );
     if (rateResult.blocked) {
       await this.logLookup(
-        store.org_id,
-        clientIp,
-        phone,
-        orderCode,
-        0,
-        'rate_limited',
-      );
+          store.org_id,
+          clientIp,
+          normalizedPhone,
+          normalizedOrderCode,
+          0,
+          'rate_limited',
+        );
       return {
         success: false,
         error: 'rate_limited',
@@ -169,8 +178,8 @@ export class LookupService {
         await this.logLookup(
           store.org_id,
           clientIp,
-          phone,
-          orderCode,
+          normalizedPhone,
+          normalizedOrderCode,
           0,
           'captcha_required',
         );
@@ -203,8 +212,8 @@ export class LookupService {
       const orders = await this.haravanOrderService.lookupOrders(
         accessToken,
         store.org_id,
-        phone,
-        orderCode,
+        normalizedPhone,
+        normalizedOrderCode,
         settings.max_orders,
       );
 
@@ -212,8 +221,8 @@ export class LookupService {
         await this.logLookup(
           store.org_id,
           clientIp,
-          phone,
-          orderCode,
+          normalizedPhone,
+          normalizedOrderCode,
           0,
           'not_found',
         );
@@ -239,8 +248,8 @@ export class LookupService {
       await this.logLookup(
         store.org_id,
         clientIp,
-        phone,
-        orderCode,
+        normalizedPhone,
+        normalizedOrderCode,
         results.length,
         'success',
       );
@@ -264,8 +273,8 @@ export class LookupService {
       await this.logLookup(
         store.org_id,
         clientIp,
-        phone,
-        orderCode,
+        normalizedPhone,
+        normalizedOrderCode,
         0,
         'error',
       );
@@ -311,6 +320,14 @@ export class LookupService {
       .replace(/^www\./, '')
       .replace(/\/+$/, '')
       .trim();
+  }
+
+  private normalizePhone(phone: string): string {
+    let value = String(phone || '').replace(/[\s().-]/g, '');
+    if (value.startsWith('+84')) value = '0' + value.slice(3);
+    else if (value.startsWith('84') && value.length > 9)
+      value = '0' + value.slice(2);
+    return value;
   }
 
   private resolveValidationOrigin(
@@ -489,16 +506,64 @@ export class LookupService {
     const fulfillments = order.fulfillments as
       | Array<Record<string, unknown>>
       | undefined;
-    const trackingInfo =
+    const shippingLines = order.shipping_lines as
+      | Array<Record<string, unknown>>
+      | undefined;
+    const trackingInfoFromFulfillments =
       fulfillments
-        ?.filter((f) => f.tracking_number || f.tracking_company)
-        .map((f) => ({
-          tracking_number: str(f.tracking_number),
-          tracking_url: str(f.tracking_url),
-          carrier: str(f.tracking_company),
-          status: str(f.status),
-          created_at: fmtDate(f.created_at),
-        })) || [];
+        ?.flatMap((f) => {
+          const directNumber = str(f.tracking_number);
+          const directUrl = str(f.tracking_url);
+          const directCarrier = str(f.tracking_company);
+          const numbers = Array.isArray(f.tracking_numbers)
+            ? (f.tracking_numbers as unknown[]).map((value) => str(value))
+            : [];
+          const urls = Array.isArray(f.tracking_urls)
+            ? (f.tracking_urls as unknown[]).map((value) => str(value))
+            : [];
+
+          const rows: Array<{
+            tracking_number?: string;
+            tracking_url?: string;
+            carrier?: string;
+            status?: string;
+            created_at?: string;
+          }> = [];
+          if (directNumber || directCarrier) {
+            rows.push({
+              tracking_number: directNumber,
+              tracking_url: directUrl,
+              carrier: directCarrier,
+              status: str(f.status),
+              created_at: fmtDate(f.created_at),
+            });
+          }
+          numbers.forEach((number, idx) => {
+            if (!number) return;
+            rows.push({
+              tracking_number: number,
+              tracking_url: urls[idx],
+              carrier: directCarrier,
+              status: str(f.status),
+              created_at: fmtDate(f.created_at),
+            });
+          });
+          return rows;
+        })
+        .filter((row) => row.tracking_number || row.carrier) || [];
+    const trackingInfoFromShippingLines =
+      shippingLines
+        ?.map((line) => ({
+          tracking_number: str(line.code) || str(line.phone),
+          tracking_url: str(line.url),
+          carrier: str(line.title) || str(line.name),
+          status: undefined,
+          created_at: undefined,
+        }))
+        .filter((row) => row.tracking_number || row.carrier) || [];
+    const trackingInfo = trackingInfoFromFulfillments.length
+      ? trackingInfoFromFulfillments
+      : trackingInfoFromShippingLines;
 
     // ─── Discounts ───
     const discountCodes = order.discount_codes as

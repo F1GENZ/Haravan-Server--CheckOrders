@@ -72,10 +72,26 @@ export class MaskingService {
       }
     }
 
-    // Always include order_number and status for display
+    // Always include helper fields required by storefront rendering
+    if (order.customer_name) filtered.customer_name = order.customer_name;
     if (order.order_number) filtered.order_number = order.order_number;
     if (order.status_text) filtered.status_text = order.status_text;
     if (order.status_class) filtered.status_class = order.status_class;
+    if (visibleFields.includes('status') && order.financial_status) {
+      filtered.financial_status = order.financial_status;
+    }
+    if (visibleFields.includes('total_price')) {
+      if (order.subtotal_price) filtered.subtotal_price = order.subtotal_price;
+      if (order.total_discounts)
+        filtered.total_discounts = order.total_discounts;
+      if (order.gateway) filtered.gateway = order.gateway;
+    }
+    if (visibleFields.includes('fulfillment_status')) {
+      if (order.fulfillment_status_raw)
+        filtered.fulfillment_status_raw = order.fulfillment_status_raw;
+      if (order.tracking) filtered.tracking = order.tracking;
+      if (order.cancelled_at) filtered.cancelled_at = order.cancelled_at;
+    }
 
     return filtered;
   }

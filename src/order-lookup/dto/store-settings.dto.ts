@@ -83,6 +83,11 @@ export class UpdateStoreSettingsDto {
   theme_color?: string;
 
   @IsOptional()
+  @IsString()
+  @Matches(/^#[0-9a-fA-F]{6}$/)
+  theme_text_color?: string;
+
+  @IsOptional()
   @IsObject()
   widget_texts?: Record<string, string>;
 

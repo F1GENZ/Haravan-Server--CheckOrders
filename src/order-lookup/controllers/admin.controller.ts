@@ -249,6 +249,7 @@ export class AdminController {
           : settings.widget_display_mode || 'inline',
       widget_trigger_action: settings.widget_trigger_action || 'modal',
       widget_trigger_link_url: settings.widget_trigger_link_url || '',
+      theme_text_color: settings.theme_text_color || '#ffffff',
       public_shop: publicShopIdentifier(store),
     })};</script>
 ${html}
