@@ -144,7 +144,9 @@ export class LookupController {
       settings.widget_display_mode === 'trigger' ? 'trigger' : 'popup';
     const triggerAction =
       settings.widget_trigger_action === 'link' ? 'link' : 'modal';
-    const triggerLinkUrl = String(settings.widget_trigger_link_url || '').trim();
+    const triggerLinkUrl = String(
+      settings.widget_trigger_link_url || '',
+    ).trim();
     const widgetEnabled = settings.widget_enabled !== false;
 
     const js = `
@@ -434,17 +436,19 @@ export class LookupController {
     const settings = await this.storeService.getSettings(store.org_id);
     const configPayload = JSON.stringify({
       lookup_method: settings.lookup_method || 'phone_and_code',
-      visible_fields: settings.visible_fields || [
-        'order_number',
-        'status',
-        'created_at',
-        'total_price',
-        'fulfillment_status',
-        'line_items',
-        'phone',
-        'email',
-        'shipping_address',
-      ],
+      visible_fields: Array.isArray(settings.visible_fields)
+        ? settings.visible_fields
+        : [
+            'order_number',
+            'status',
+            'created_at',
+            'total_price',
+            'fulfillment_status',
+            'line_items',
+            'phone',
+            'email',
+            'shipping_address',
+          ],
       mask_phone: settings.mask_phone !== false,
       mask_email: settings.mask_email !== false,
       mask_address: settings.mask_address !== false,

@@ -21,6 +21,8 @@ const baseStore: StoreRecord = {
 const baseSettings: StoreSettings = {
   widget_enabled: true,
   widget_display_mode: 'inline',
+  widget_trigger_action: 'modal',
+  widget_trigger_link_url: '',
   lookup_method: 'phone_and_code',
   visible_fields: [
     'order_number',
@@ -35,6 +37,7 @@ const baseSettings: StoreSettings = {
   mask_email: true,
   mask_address: true,
   theme_color: '#4361ee',
+  theme_text_color: '#ffffff',
   widget_texts: {},
   rebuy_enabled: true,
 };

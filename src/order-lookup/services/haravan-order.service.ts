@@ -208,9 +208,20 @@ export class HaravanOrderService {
   // ─── Private ───
 
   private normalizePhone(phone: string): string {
-    let p = phone.replace(/[\s().-]/g, '');
-    if (p.startsWith('+84')) p = '0' + p.slice(3);
-    else if (p.startsWith('84') && p.length > 10) p = '0' + p.slice(2);
+    // Strip whitespace, dashes, dots, parens
+    let p = String(phone || '').replace(/[\s().-]/g, '');
+    // +84... → 0...
+    if (p.startsWith('+84')) {
+      p = '0' + p.slice(3);
+    }
+    // 84... (without +) — only convert when clearly VN intl format (11+ digits)
+    else if (/^84\d{9,}$/.test(p)) {
+      p = '0' + p.slice(2);
+    }
+    // Other +XX... international — strip + and keep digits for consistent matching
+    else if (p.startsWith('+')) {
+      p = p.slice(1);
+    }
     return p;
   }
 

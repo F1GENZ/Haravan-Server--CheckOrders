@@ -158,13 +158,13 @@ export class LookupService {
     );
     if (rateResult.blocked) {
       await this.logLookup(
-          store.org_id,
-          clientIp,
-          normalizedPhone,
-          normalizedOrderCode,
-          0,
-          'rate_limited',
-        );
+        store.org_id,
+        clientIp,
+        normalizedPhone,
+        normalizedOrderCode,
+        0,
+        'rate_limited',
+      );
       return {
         success: false,
         error: 'rate_limited',
@@ -323,10 +323,21 @@ export class LookupService {
   }
 
   private normalizePhone(phone: string): string {
+    // Strip whitespace, dashes, dots, parens
     let value = String(phone || '').replace(/[\s().-]/g, '');
-    if (value.startsWith('+84')) value = '0' + value.slice(3);
-    else if (value.startsWith('84') && value.length > 9)
+    // +84... → 0...
+    if (value.startsWith('+84')) {
+      value = '0' + value.slice(3);
+    }
+    // 84... (without +) — only convert when clearly a VN intl format (11+ digits)
+    else if (/^84\d{9,}$/.test(value)) {
       value = '0' + value.slice(2);
+    }
+    // Other +XX... international numbers — strip leading + and keep as-is for matching
+    // The backend stores whatever the merchant entered, so we normalize both sides consistently
+    else if (value.startsWith('+')) {
+      value = value.slice(1);
+    }
     return value;
   }
 
@@ -465,7 +476,17 @@ export class LookupService {
         str(customer?.first_name) || str(shipping?.first_name),
       ]
         .filter(Boolean)
-        .join(' ') || undefined;
+        .join(' ') ||
+      str(customer?.name) ||
+      [str(shipping?.last_name), str(shipping?.first_name)]
+        .filter(Boolean)
+        .join(' ') ||
+      str(shipping?.name) ||
+      [str(billing?.last_name), str(billing?.first_name)]
+        .filter(Boolean)
+        .join(' ') ||
+      str(billing?.name) ||
+      undefined;
 
     // ─── Addresses ───
     const buildAddress = (addr: Record<string, unknown> | undefined) => {
@@ -607,9 +628,14 @@ export class LookupService {
               rawFulfillmentStatus,
             )
           ? 'partial'
-          : ['shipping', 'shipped', 'in_transit', 'intransit', 'out_for_delivery', 'outfordelivery'].includes(
-                rawFulfillmentStatus,
-              ) || hasTrackingInfo
+          : [
+                'shipping',
+                'shipped',
+                'in_transit',
+                'intransit',
+                'out_for_delivery',
+                'outfordelivery',
+              ].includes(rawFulfillmentStatus) || hasTrackingInfo
             ? 'shipping'
             : 'notfulfilled';
 

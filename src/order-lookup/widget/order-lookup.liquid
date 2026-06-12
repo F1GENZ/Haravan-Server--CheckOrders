@@ -499,6 +499,13 @@
     background: var(--f1g-primary);
     animation: f1g-pulse 2s infinite;
   }
+  .f1g-ot__step--cancelled .f1g-ot__step-dot {
+    background: var(--f1g-danger);
+  }
+  .f1g-ot__step--cancelled .f1g-ot__step-label {
+    color: var(--f1g-danger);
+    font-weight: 600;
+  }
   @keyframes f1g-pulse {
     0%,
     100% {
@@ -550,6 +557,11 @@
     margin: 0.75rem 0 0.5rem;
     padding-top: 0.75rem;
     border-top: 1px solid #f0f0f5;
+  }
+  .f1g-ot__sep--first {
+    margin-top: 0;
+    padding-top: 0;
+    border-top: none;
   }
 
   /* Product */
@@ -1025,14 +1037,24 @@
       btnSp.style.display = 'none';
       btnTxt.textContent = T.btn_search;
       if (!enabled) {
-        if (displayMode === 'popup' && popupBtn) popupBtn.style.display = 'none';
+        if ((displayMode === 'popup' || displayMode === 'trigger') && popupBtn) popupBtn.style.display = 'none';
+        // Hide trigger buttons on the storefront page
+        document.querySelectorAll('[data-f1g-checkorders-open]').forEach(function (el) {
+          el.setAttribute('hidden', 'hidden');
+          if (el.tagName === 'BUTTON') el.disabled = true;
+        });
         errMsg.textContent = T.disabled_desc;
         errEl.style.display = 'block';
         listEl.style.display = 'none';
         pagingEl.style.display = 'none';
         emptyEl.style.display = 'block';
       } else if (errMsg.textContent === T.disabled_desc) {
-        if (displayMode === 'popup' && popupBtn) popupBtn.style.display = '';
+        if ((displayMode === 'popup' || displayMode === 'trigger') && popupBtn) popupBtn.style.display = '';
+        // Restore trigger buttons
+        document.querySelectorAll('[data-f1g-checkorders-open]').forEach(function (el) {
+          el.removeAttribute('hidden');
+          if (el.tagName === 'BUTTON') el.disabled = false;
+        });
         errEl.style.display = 'none';
       }
     }
@@ -1127,7 +1149,8 @@
     function normalizePhone(v) {
       var p = String(v || '').replace(/[\s\-().]/g, '');
       if (p.indexOf('+84') === 0) p = '0' + p.slice(3);
-      else if (p.indexOf('84') === 0 && p.length > 10) p = '0' + p.slice(2);
+      else if (/^84\d{9,}$/.test(p)) p = '0' + p.slice(2);
+      else if (p.charAt(0) === '+') p = p.slice(1);
       return p;
     }
 
@@ -1526,6 +1549,8 @@
 
     function addRebuyItemsToCart(base, items) {
       return requestParentAddToCart(items).catch(function (error) {
+        // bridge_unavailable = not framed or no parentOrigin → try direct fetch (same-origin context)
+        // bridge_timeout = framed but parent has no listener → cross-origin fetch would fail, skip
         if (!error || error.message !== 'bridge_unavailable') throw error;
         return items.reduce(function (promise, item) {
           return promise.then(function () {
@@ -1580,7 +1605,7 @@
 
     function renderOrder(o, idx, orderIndex) {
       var cfg = window.__f1gConfig || {};
-      var vf = cfg.visible_fields || [
+      var vf = Array.isArray(cfg.visible_fields) ? cfg.visible_fields : [
         'order_number',
         'status',
         'created_at',
@@ -1656,6 +1681,14 @@
       // Timeline stepper (shown if fulfillment_status visible)
       if (has('fulfillment_status')) h += renderTimeline(o);
 
+      // Track whether any section has been rendered (to avoid top border on first sep)
+      var sectionCount = 0;
+      function sepTitleTracked(t) {
+        var cls = sectionCount === 0 ? 'f1g-ot__sep f1g-ot__sep--first' : 'f1g-ot__sep';
+        sectionCount++;
+        return '<div class="' + cls + '">' + esc(t) + '</div>';
+      }
+
       // Customer section
       var showCustomer =
         o.customer_name ||
@@ -1663,7 +1696,7 @@
         (has('email') && o.email) ||
         (has('shipping_address') && o.shipping_address);
       if (showCustomer) {
-        h += sepTitle(T.sec_customer);
+        h += sepTitleTracked(T.sec_customer);
         h += '<div class="f1g-ot__info">';
         if (o.customer_name) h += iCell(T.lbl_name, o.customer_name);
         if (has('phone') && o.phone) h += iCell(T.lbl_phone, doMaskPhone ? maskPhone(o.phone) : o.phone);
@@ -1682,20 +1715,20 @@
         (has('total_price') &&
           (o.total_price || o.subtotal_price || o.total_discounts || o.gateway));
       if (showDetails) {
-        h += sepTitle(T.sec_detail);
+        h += sepTitleTracked(T.sec_detail);
         h += '<div class="f1g-ot__info">';
         if (has('created_at') && o.created_at) h += iCell(T.lbl_date, o.created_at);
         if (has('total_price') && o.total_price) h += iCellHtml(T.lbl_total, '<strong>' + esc(o.total_price) + '</strong>');
         if (has('total_price') && o.subtotal_price) h += iCell(T.lbl_subtotal, o.subtotal_price);
         if (has('total_price') && o.total_discounts && o.total_discounts !== '0₫')
           h += iCell(T.lbl_discount, '-' + o.total_discounts);
-        if (o.gateway) h += iCell(T.lbl_payment, o.gateway);
+        if (has('total_price') && o.gateway) h += iCell(T.lbl_payment, o.gateway);
         h += '</div>';
       }
 
       // Products
       if (has('line_items') && o.line_items && o.line_items.length) {
-        h += sepTitle(T.sec_products + ' (' + o.line_items.length + ')');
+        h += sepTitleTracked(T.sec_products + ' (' + o.line_items.length + ')');
         o.line_items.forEach(function (item) {
           h += '<div class="f1g-ot__prod">';
           var itemImageUrl = safeUrl(item.image);
@@ -1721,7 +1754,7 @@
         });
       }
 
-      // Shipping
+      // Shipping status (only if fulfillment_status field is visible)
       if (has('fulfillment_status') && o.fulfillment_status) {
         h +=
           '<div class="f1g-ot__ship"><span class="f1g-ot__ship-lbl">' +
@@ -1730,7 +1763,8 @@
           esc(translateFulfill(o.fulfillment_status_raw, o.fulfillment_status)) +
           '</span></div>';
       }
-      if (has('fulfillment_status') && o.tracking && o.tracking.length) {
+      // Tracking info — always shown when available (independent of fulfillment_status visibility)
+      if (o.tracking && o.tracking.length) {
         o.tracking.forEach(function (t) {
           h +=
             '<div style="font-size:.78rem;color:#475569;margin-top:.35rem;padding:.3rem .7rem;background:#f8fafc;border-radius:6px">';
@@ -1789,19 +1823,34 @@
       var fs = String(o.fulfillment_status_raw || o.fulfillment_status || '').toLowerCase();
       var ps = String(o.status_class || '').toLowerCase();
       var activeIdx = 0;
-      var cancelled = Boolean(o.cancelled_at) || fs.indexOf('cancel') >= 0 || fs.indexOf('void') >= 0;
-      if (cancelled || ps === 'cancelled') activeIdx = 1;
-      else if (['fulfilled', 'delivered', 'shipped'].indexOf(fs) >= 0) activeIdx = 3;
-      else if (['partial', 'partiallyfulfilled', 'shipping', 'intransit'].indexOf(fs.replace(/[_\\s-]/g, '')) >= 0) activeIdx = 2;
-      else if (ps === 'success' || fs === 'confirmed' || fs === 'paid') activeIdx = 1;
-      else activeIdx = 0;
+      var cancelled = Boolean(o.cancelled_at) ||
+        ['cancelled', 'canceled', 'restocked', 'voided'].indexOf(fs) >= 0 ||
+        ps === 'cancelled';
+      if (cancelled) {
+        // Cancelled: stop at step 1 (Xác nhận) with a special visual — bar stays at 0
+        activeIdx = 0;
+      } else if (['fulfilled', 'delivered', 'shipped', 'completed', 'success'].indexOf(fs) >= 0) {
+        activeIdx = 3;
+      } else if (['partial', 'partiallyfulfilled', 'shipping', 'shipped', 'intransit', 'out_for_delivery', 'outfordelivery'].indexOf(fs.replace(/[_\s-]/g, '')) >= 0) {
+        activeIdx = 2;
+      } else if (ps === 'success' || fs === 'confirmed' || fs === 'paid') {
+        activeIdx = 1;
+      } else {
+        activeIdx = 0;
+      }
 
-      var barW = activeIdx > 0 ? (activeIdx / (steps.length - 1)) * 100 + '%' : '0%';
-      var h = '<div class="f1g-ot__timeline"><div class="f1g-ot__timeline-bar" style="width:' + barW + '"></div>';
+      var barW = cancelled ? '0%' : (activeIdx > 0 ? (activeIdx / (steps.length - 1)) * 100 + '%' : '0%');
+      var barColor = cancelled ? 'var(--f1g-danger)' : 'var(--f1g-success)';
+      var h = '<div class="f1g-ot__timeline"><div class="f1g-ot__timeline-bar" style="width:' + barW + ';background:' + barColor + '"></div>';
       steps.forEach(function (s, i) {
         var cls = 'f1g-ot__step';
-        if (i < activeIdx) cls += ' f1g-ot__step--done';
-        else if (i === activeIdx) cls += ' f1g-ot__step--active';
+        if (cancelled) {
+          // All steps grey except step 0 which shows as cancelled (red dot)
+          if (i === 0) cls += ' f1g-ot__step--cancelled';
+        } else {
+          if (i < activeIdx) cls += ' f1g-ot__step--done';
+          else if (i === activeIdx) cls += ' f1g-ot__step--active';
+        }
         h +=
           '<div class="' +
           cls +
@@ -1908,5 +1957,32 @@
       } catch (e) {}
       return '';
     }
+
+    // ─── Bug #26: Auto-resize iframe height when in inline mode ───
+    // When embedded as <iframe>, notify parent of actual document height so
+    // the parent can resize the iframe and avoid content clipping / layout jump.
+    (function initAutoResize() {
+      // Only active in inline mode inside an iframe
+      if (!isFramed()) return;
+      var lastHeight = 0;
+      function reportHeight() {
+        var h = document.documentElement.scrollHeight || document.body.scrollHeight || 0;
+        if (h === lastHeight) return;
+        lastHeight = h;
+        try {
+          window.parent.postMessage({ type: 'f1g_widget_height', height: h }, '*');
+        } catch (e) {}
+      }
+      // Report on load
+      reportHeight();
+      // Report on DOM mutations (results rendered, sections toggled)
+      if (typeof MutationObserver !== 'undefined') {
+        var mo = new MutationObserver(function () { setTimeout(reportHeight, 50); });
+        mo.observe(document.body, { childList: true, subtree: true, attributes: true });
+      }
+      // Fallback polling
+      setInterval(reportHeight, 400);
+    })();
+
   })();
 </script>

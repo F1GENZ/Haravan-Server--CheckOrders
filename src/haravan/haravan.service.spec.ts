@@ -1,4 +1,4 @@
-import type { ConfigService } from '@nestjs/config';
+﻿import type { ConfigService } from '@nestjs/config';
 import type { Request, Response } from 'express';
 import axios from 'axios';
 import * as crypto from 'crypto';
@@ -320,9 +320,9 @@ describe('HaravanService OAuth security', () => {
     expect(result.orgid).toBeUndefined();
     expect(result.sessionToken).toBeUndefined();
     expect(result.url).toContain('/connect/authorize');
-    expect(redis.get('haravan:checkorders:shop_domain:shop.myharavan.com')).toBe(
-      'org_1',
-    );
+    expect(
+      redis.get('haravan:checkorders:shop_domain:shop.myharavan.com'),
+    ).toBe('org_1');
   });
 
   it('does not create a session when shop mapping belongs to another orgid', async () => {
@@ -374,7 +374,7 @@ describe('HaravanService OAuth security', () => {
         'x-haravan-topic': 'app_subscriptions/update',
         'x-haravan-org-id': 'org_1',
       },
-    } as Request & { rawBody: Buffer });
+    } as unknown as Request & { rawBody: Buffer });
 
     expect(result).toEqual(
       expect.objectContaining({ ok: true, orgid: 'org_1' }),
@@ -462,7 +462,7 @@ describe('HaravanService OAuth security', () => {
         'x-haravan-hmacsha256': hmac,
         'x-haravan-topic': 'app/uninstalled',
       },
-    } as Request & { rawBody: Buffer });
+    } as unknown as Request & { rawBody: Buffer });
 
     expect(result).toEqual(
       expect.objectContaining({ ok: true, orgid: 'org_1', uninstalled: true }),
@@ -513,7 +513,7 @@ describe('HaravanService OAuth security', () => {
         'x-haravan-hmacsha256': hmac,
         'x-haravan-topic': 'shop/update',
       },
-    } as Request & { rawBody: Buffer });
+    } as unknown as Request & { rawBody: Buffer });
 
     expect(result).toEqual(
       expect.objectContaining({ ok: true, orgid: 'org_1' }),
