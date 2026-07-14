@@ -4,15 +4,14 @@ import {
   Matches,
   MaxLength,
   MinLength,
+  ValidateIf,
 } from 'class-validator';
 import { Transform } from 'class-transformer';
+import { normalizeLookupPhone } from '../utils/phone.util';
 
 const normalizePhone = (value: unknown): unknown => {
   if (typeof value !== 'string') return value;
-  let phone = value.replace(/[\s\-().]/g, '');
-  if (phone.startsWith('+84')) phone = `0${phone.slice(3)}`;
-  if (phone.startsWith('84') && phone.length > 10) phone = `0${phone.slice(2)}`;
-  return phone;
+  return normalizeLookupPhone(value);
 };
 
 const normalizeShop = (value: unknown): unknown => {
@@ -46,7 +45,12 @@ export class LookupRequestDto {
   @IsOptional()
   @Transform(({ value }: { value: unknown }) => normalizePhone(value))
   @IsString()
-  @Matches(/^0\d{9,10}$/, { message: 'Số điện thoại không hợp lệ' })
+  @ValidateIf(
+    (_obj, value) => value !== undefined && value !== null && value !== '',
+  )
+  @Matches(/^\d{8,15}$/, {
+    message: 'Số điện thoại không hợp lệ',
+  })
   phone?: string;
 
   @IsOptional()

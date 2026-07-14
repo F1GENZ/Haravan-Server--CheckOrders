@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { RedisService } from '../../redis/redis.service';
 import axios, { AxiosError } from 'axios';
 import * as crypto from 'crypto';
+import { normalizeLookupPhone } from '../utils/phone.util';
 
 // ─── Types ───
 
@@ -208,21 +209,7 @@ export class HaravanOrderService {
   // ─── Private ───
 
   private normalizePhone(phone: string): string {
-    // Strip whitespace, dashes, dots, parens
-    let p = String(phone || '').replace(/[\s().-]/g, '');
-    // +84... → 0...
-    if (p.startsWith('+84')) {
-      p = '0' + p.slice(3);
-    }
-    // 84... (without +) — only convert when clearly VN intl format (11+ digits)
-    else if (/^84\d{9,}$/.test(p)) {
-      p = '0' + p.slice(2);
-    }
-    // Other +XX... international — strip + and keep digits for consistent matching
-    else if (p.startsWith('+')) {
-      p = p.slice(1);
-    }
-    return p;
+    return normalizeLookupPhone(phone);
   }
 
   private buildCacheKey(

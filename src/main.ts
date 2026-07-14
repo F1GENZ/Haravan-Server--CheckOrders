@@ -162,10 +162,33 @@ async function bootstrap() {
       ) {
         return true;
       }
-      return hostname === 'f1genz.com' || hostname.endsWith('.f1genz.com');
+      // App surfaces
+      if (hostname === 'f1genz.com' || hostname.endsWith('.f1genz.com')) {
+        return true;
+      }
+      // Haravan storefronts (widget may also call API with shop Origin)
+      if (
+        hostname === 'myharavan.com' ||
+        hostname.endsWith('.myharavan.com')
+      ) {
+        return true;
+      }
+      return false;
     } catch {
       return false;
     }
+  };
+
+  // Public widget/lookup paths use OrderLookupCorsMiddleware for custom domains.
+  // Global OPTIONS must not 403 those routes before the dynamic middleware runs.
+  const isDynamicCorsPath = (reqPath: string): boolean => {
+    const path = String(reqPath || '');
+    return (
+      path === '/api/order/lookup' ||
+      path.startsWith('/api/order/lookup?') ||
+      path === '/api/order/widget' ||
+      path.startsWith('/api/order/widget/')
+    );
   };
 
   app.use((req: Request, res: Response, next: NextFunction) => {
@@ -178,15 +201,20 @@ async function bootstrap() {
       res.setHeader('Access-Control-Expose-Headers', 'Content-Length');
       res.setHeader('Access-Control-Max-Age', '86400');
       res.setHeader('Vary', 'Origin');
-    } else if (typeof origin === 'string') {
+    } else if (typeof origin === 'string' && !isDynamicCorsPath(req.path)) {
       logger.warn(`Blocked CORS origin: ${origin}`);
     }
 
     if (req.method === 'OPTIONS') {
-      res.status(
-        typeof origin === 'string' && !isAllowedOrigin(origin) ? 403 : 204,
-      );
-      res.end();
+      if (typeof origin === 'string' && isAllowedOrigin(origin)) {
+        res.status(204).end();
+        return;
+      }
+      // Defer storefront custom-domain preflight to OrderLookupCorsMiddleware
+      if (isDynamicCorsPath(req.path)) {
+        return next();
+      }
+      res.status(403).end();
       return;
     }
 

@@ -17,6 +17,7 @@ import type {
   OrderResult,
   LookupResponseDto,
 } from '../dto/lookup-response.dto';
+import { normalizeLookupPhone } from '../utils/phone.util';
 import * as crypto from 'crypto';
 import axios from 'axios';
 
@@ -323,22 +324,7 @@ export class LookupService {
   }
 
   private normalizePhone(phone: string): string {
-    // Strip whitespace, dashes, dots, parens
-    let value = String(phone || '').replace(/[\s().-]/g, '');
-    // +84... → 0...
-    if (value.startsWith('+84')) {
-      value = '0' + value.slice(3);
-    }
-    // 84... (without +) — only convert when clearly a VN intl format (11+ digits)
-    else if (/^84\d{9,}$/.test(value)) {
-      value = '0' + value.slice(2);
-    }
-    // Other +XX... international numbers — strip leading + and keep as-is for matching
-    // The backend stores whatever the merchant entered, so we normalize both sides consistently
-    else if (value.startsWith('+')) {
-      value = value.slice(1);
-    }
-    return value;
+    return normalizeLookupPhone(phone);
   }
 
   private resolveValidationOrigin(

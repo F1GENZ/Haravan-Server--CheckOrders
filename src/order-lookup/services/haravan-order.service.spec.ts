@@ -137,6 +137,64 @@ describe('HaravanOrderService lookup filtering', () => {
     expect(result[0]?.id).toBe(1);
   });
 
+  it('matches non-VN international phones after + strip', async () => {
+    mockedAxios.get.mockResolvedValueOnce({
+      data: {
+        orders: [
+          {
+            id: 1,
+            name: '#10001',
+            order_number: 10001,
+            customer: { phone: '+14155552671' },
+          },
+          {
+            id: 2,
+            name: '#10002',
+            order_number: 10002,
+            customer: { phone: '+84901234567' },
+          },
+        ],
+      },
+    });
+
+    const result = await createService().lookupOrders(
+      'access-token',
+      'store-1',
+      '+14155552671',
+      undefined,
+      5,
+    );
+
+    expect(result).toHaveLength(1);
+    expect(result[0]?.id).toBe(1);
+  });
+
+  it('matches long 15-digit phones exactly', async () => {
+    mockedAxios.get.mockResolvedValueOnce({
+      data: {
+        orders: [
+          {
+            id: 1,
+            name: '#10001',
+            order_number: 10001,
+            phone: '012345678901234',
+          },
+        ],
+      },
+    });
+
+    const result = await createService().lookupOrders(
+      'access-token',
+      'store-1',
+      '012345678901234',
+      undefined,
+      5,
+    );
+
+    expect(result).toHaveLength(1);
+    expect(result[0]?.id).toBe(1);
+  });
+
   it('caches full filtered results before applying max order limit', async () => {
     const service = createService();
     mockedAxios.get.mockResolvedValueOnce({

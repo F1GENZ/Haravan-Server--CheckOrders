@@ -74,8 +74,15 @@ export class OrderLookupCorsMiddleware implements NestMiddleware {
         return true;
       }
 
-      // All *.myharavan.com storefronts are trusted
-      // Custom domains → check Redis
+      // All Haravan storefront hosts are trusted
+      if (
+        hostname === 'myharavan.com' ||
+        hostname.endsWith('.myharavan.com')
+      ) {
+        return true;
+      }
+
+      // Custom domains → check Redis domain index
       return this.storeService.existsByDomain(hostname);
     } catch {
       return false;
