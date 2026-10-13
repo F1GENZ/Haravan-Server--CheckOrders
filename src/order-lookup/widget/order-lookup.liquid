@@ -1035,6 +1035,9 @@
     }
 
     function setWidgetEnabled(enabled) {
+      var wasDisabled = root.classList.contains('f1g-ot--disabled');
+      var emptyTitle = root.querySelector('.f1g-ot__empty-title');
+      var emptyDesc = root.querySelector('.f1g-ot__empty-desc');
       root.classList.toggle('f1g-ot--disabled', !enabled);
       [phoneEl, codeEl, btn].forEach(function (el) {
         if (el) el.disabled = !enabled;
@@ -1051,18 +1054,21 @@
           el.setAttribute('hidden', 'hidden');
           if (el.tagName === 'BUTTON') el.disabled = true;
         });
-        errMsg.textContent = T.disabled_desc;
-        errEl.style.display = 'block';
+        if (emptyTitle) emptyTitle.textContent = T.disabled_title;
+        if (emptyDesc) emptyDesc.textContent = T.disabled_desc;
+        errEl.style.display = 'none';
         listEl.style.display = 'none';
         pagingEl.style.display = 'none';
         emptyEl.style.display = 'block';
-      } else if (errMsg.textContent === T.disabled_desc) {
+      } else if (wasDisabled) {
         if ((displayMode === 'popup' || displayMode === 'trigger') && popupBtn) popupBtn.style.display = '';
         // Restore trigger buttons
         document.querySelectorAll('[data-f1g-checkorders-open]').forEach(function (el) {
           el.removeAttribute('hidden');
           if (el.tagName === 'BUTTON') el.disabled = false;
         });
+        if (emptyTitle) emptyTitle.textContent = T.empty_title;
+        if (emptyDesc) emptyDesc.textContent = T.empty_desc;
         errEl.style.display = 'none';
       }
     }
