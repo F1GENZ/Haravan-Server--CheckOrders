@@ -28,6 +28,17 @@ jobs:
             git checkout main
             git pull --ff-only origin main
 
+            PREMIUM_ORGIDS_VALUE='${{ vars.PREMIUM_ORGIDS }}'
+            if [[ ! "$PREMIUM_ORGIDS_VALUE" =~ ^[0-9,]*$ ]]; then
+              echo "Invalid PREMIUM_ORGIDS variable" >&2
+              exit 1
+            fi
+            if grep -q '^PREMIUM_ORGIDS=' .env; then
+              sed -i "s/^PREMIUM_ORGIDS=.*/PREMIUM_ORGIDS=${PREMIUM_ORGIDS_VALUE}/" .env
+            else
+              printf '\nPREMIUM_ORGIDS=%s\n' "$PREMIUM_ORGIDS_VALUE" >> .env
+            fi
+
             npm ci
             npm run db:generate
             npx prisma migrate deploy
