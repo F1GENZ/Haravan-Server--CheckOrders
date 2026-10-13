@@ -31,6 +31,7 @@ describe('StoreService settings normalization', () => {
         widget_trigger_link_url: '',
         lookup_method: 'phone_and_code',
         visible_fields: ['order_number', 'status', 'created_at'],
+        visible_fields_version: 2,
         max_orders: 5,
         mask_phone: true,
         mask_email: true,
@@ -57,5 +58,92 @@ describe('StoreService settings normalization', () => {
         visible_fields: ['order_number', 'status', 'created_at'],
       }),
     );
+  });
+
+  it('upgrades legacy visible_fields once: keeps customer name, derives tracking_info from fulfillment_status', async () => {
+    const redis = new RedisMock();
+    const baseSettings = {
+      widget_enabled: true,
+      widget_display_mode: 'inline',
+      widget_trigger_action: 'modal',
+      widget_trigger_link_url: '',
+      lookup_method: 'phone_and_code',
+      max_orders: 5,
+      mask_phone: true,
+      mask_email: true,
+      mask_address: true,
+      theme_color: '#4361ee',
+      theme_text_color: '#ffffff',
+      widget_texts: {},
+      rebuy_enabled: true,
+    };
+    const withStatus = {
+      findSettings: jest.fn().mockResolvedValue({
+        ...baseSettings,
+        visible_fields: ['order_number', 'fulfillment_status'],
+      }),
+      upsertSettings: jest.fn(),
+    };
+    const withoutStatus = {
+      findSettings: jest.fn().mockResolvedValue({
+        ...baseSettings,
+        visible_fields: ['order_number'],
+      }),
+      upsertSettings: jest.fn(),
+    };
+
+    const a = await new StoreService(
+      new RedisMock() as never,
+      withStatus as never,
+    ).getSettings('org-1');
+    const b = await new StoreService(
+      redis as never,
+      withoutStatus as never,
+    ).getSettings('org-2');
+
+    expect(a.visible_fields).toEqual([
+      'order_number',
+      'fulfillment_status',
+      'customer_name',
+      'tracking_info',
+    ]);
+    expect(a.visible_fields_version).toBe(2);
+    expect(withStatus.upsertSettings).toHaveBeenCalledTimes(1);
+    expect(b.visible_fields).toEqual(['order_number', 'customer_name']);
+  });
+});
+
+describe('StoreService.isEntitled', () => {
+  const service = new StoreService(new RedisMock() as never);
+  const now = Date.parse('2026-10-13T00:00:00Z');
+
+  it('blocks expired trial and cancelled subscription statuses', () => {
+    expect(
+      service.isEntitled(
+        { status: 'trial', plan: 'Trial', expires_at: '2026-06-04T00:00:00Z' },
+        now,
+      ),
+    ).toBe(false);
+    expect(
+      service.isEntitled(
+        { status: 'unactive', plan: 'Free', expires_at: '2027-01-01T00:00:00Z' },
+        now,
+      ),
+    ).toBe(false);
+  });
+
+  it('allows live trial and paid plan', () => {
+    expect(
+      service.isEntitled(
+        { status: 'trial', plan: 'Trial', expires_at: '2026-10-20T00:00:00Z' },
+        now,
+      ),
+    ).toBe(true);
+    expect(
+      service.isEntitled(
+        { status: 'active', plan: 'Pro', expires_at: '2026-01-01T00:00:00Z' },
+        now,
+      ),
+    ).toBe(true);
   });
 });

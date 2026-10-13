@@ -47,6 +47,7 @@ const createService = () => {
   const storeService = {
     getStoreByPublicShop: jest.fn().mockResolvedValue(baseStore),
     getSettings: jest.fn().mockResolvedValue(baseSettings),
+    isEntitled: jest.fn().mockReturnValue(true),
   };
   const haravanOrderService = {
     lookupOrders: jest.fn().mockResolvedValue([
@@ -169,6 +170,116 @@ describe('LookupService storefront origin handling', () => {
       '0901234567',
       '10001',
       5,
+    ]);
+  });
+});
+
+describe('LookupService subscription gating', () => {
+  it('refuses lookups for expired shops without calling Haravan', async () => {
+    const { service, storeService, haravanOrderService } = createService();
+    storeService.isEntitled.mockReturnValueOnce(false);
+
+    const response = await service.lookup(
+      'shop',
+      '0901234567',
+      '#10001',
+      '203.0.113.10',
+      'https://checkorders.example.com',
+      'https://shop.myharavan.com',
+      undefined,
+      'checkorders.example.com',
+    );
+
+    expect(response).toMatchObject({
+      success: false,
+      error: 'subscription_expired',
+    });
+    expect(haravanOrderService.lookupOrders.mock.calls).toHaveLength(0);
+  });
+});
+
+describe('LookupService order normalization', () => {
+  const lookupWith = async (
+    order: Record<string, unknown>,
+    visibleFields: StoreSettings['visible_fields'],
+  ) => {
+    const { service, storeService, haravanOrderService } = createService();
+    haravanOrderService.lookupOrders.mockResolvedValueOnce([order]);
+    storeService.getSettings.mockResolvedValueOnce({
+      ...baseSettings,
+      visible_fields: visibleFields,
+    });
+    const response = await service.lookup(
+      'shop',
+      '0901234567',
+      '#10001',
+      '203.0.113.10',
+      'https://checkorders.example.com',
+      'https://shop.myharavan.com',
+      undefined,
+      'checkorders.example.com',
+    );
+    expect(response.success).toBe(true);
+    return response.orders![0] as unknown as Record<string, unknown>;
+  };
+
+  it('renders dates in GMT+7 and keeps a zero total instead of dropping it', async () => {
+    const result = await lookupWith(
+      {
+        order_number: 10001,
+        name: '#10001',
+        financial_status: 'paid',
+        created_at: '2020-10-12T08:31:35.179Z',
+        total_price: '0',
+        total_discounts: '0',
+      },
+      ['order_number', 'created_at', 'total_price'],
+    );
+
+    expect(String(result.created_at)).toContain('15:31');
+    expect(result.total_price).toBe('0₫');
+    expect(result.total_discounts).toBeUndefined();
+  });
+
+  it('collapses a fulfillment that reports the same tracking number twice', async () => {
+    const result = await lookupWith(
+      {
+        order_number: 10001,
+        name: '#10001',
+        financial_status: 'paid',
+        fulfillments: [
+          {
+            status: 'success',
+            tracking_company: 'Giao Hàng Nhanh',
+            tracking_number: 'GHN123',
+            tracking_numbers: ['GHN123'],
+            tracking_urls: ['https://donhang.ghn.vn/?order_code=GHN123'],
+          },
+        ],
+      },
+      ['order_number', 'tracking_info'],
+    );
+
+    expect(result.tracking).toHaveLength(1);
+  });
+
+  it('keeps rebuy_items even when the merchant hides the product list', async () => {
+    const result = await lookupWith(
+      {
+        order_number: 10001,
+        name: '#10001',
+        financial_status: 'paid',
+        line_items: [
+          { title: 'Áo', variant_id: 11, quantity: 2, price: '100000' },
+          { title: 'Quà', quantity: 1, price: '0' },
+        ],
+      },
+      ['order_number'],
+    );
+
+    expect(result.line_items).toBeUndefined();
+    expect(result.rebuy_items).toEqual([
+      { variant_id: 11, quantity: 2, title: 'Áo' },
     ]);
   });
 });

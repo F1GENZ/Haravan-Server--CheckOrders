@@ -165,15 +165,33 @@ describe('HaravanService OAuth security', () => {
       registerStore: jest.fn(),
       deactivateStore: jest.fn(),
     };
+    const db = {
+      upsertInstallSession: jest.fn().mockResolvedValue(undefined),
+      findInstallSession: jest.fn().mockResolvedValue(null),
+      clearTokensForUninstall: jest.fn().mockResolvedValue(undefined),
+      recordWebhook: jest.fn().mockResolvedValue(undefined),
+      upsertSubscription: jest.fn().mockResolvedValue(undefined),
+      upsertSubscriptionSnapshot: jest.fn().mockResolvedValue(undefined),
+      findSubscriptionSnapshot: jest.fn().mockResolvedValue(null),
+      markShopInactive: jest.fn().mockResolvedValue(undefined),
+    };
+    const notificationService = { notify: jest.fn().mockResolvedValue(undefined) };
+    const orderIndexService = {
+      upsertOrder: jest.fn().mockResolvedValue(undefined),
+      deleteOrder: jest.fn().mockResolvedValue(undefined),
+      purgeOrg: jest.fn().mockResolvedValue(undefined),
+    };
     const service = new HaravanService(
       makeConfig(),
       redis as never,
       { getShop: jest.fn() } as never,
       storeService as never,
+      notificationService as never,
+      db as never,
+      orderIndexService as never,
     );
-    return { service, redis, storeService };
+    return { service, redis, storeService, db, notificationService, orderIndexService };
   };
-
   const tokenClaims = (nonce: string, overrides = {}) => {
     const now = Math.floor(Date.now() / 1000);
     return {
@@ -430,7 +448,7 @@ describe('HaravanService OAuth security', () => {
   });
 
   it('handles app uninstall webhook without deleting reinstall data', async () => {
-    const { service, redis, storeService } = createService();
+    const { service, redis, storeService, db, orderIndexService } = createService();
     const body = {
       orgid: 'org_1',
       shop_domain: 'hangquoctai.myharavan.com',
@@ -467,6 +485,7 @@ describe('HaravanService OAuth security', () => {
     expect(result).toEqual(
       expect.objectContaining({ ok: true, orgid: 'org_1', uninstalled: true }),
     );
+    expect(db.clearTokensForUninstall).toHaveBeenCalledWith('org_1');
     expect(storeService.deactivateStore).toHaveBeenCalledWith('org_1');
     expect(
       redis.get('haravan:checkorders:shop_domain:hangquoctai.myharavan.com'),
@@ -479,8 +498,64 @@ describe('HaravanService OAuth security', () => {
         haravan_token_status: 'uninstalled',
       }),
     );
+    expect(orderIndexService.purgeOrg).toHaveBeenCalledWith('org_1');
   });
 
+  it('handles app uninstall webhook even when redis install session is absent', async () => {
+    const { service, storeService, db } = createService();
+    const body = {
+      orgid: 'org_1',
+      myharavan_domain: 'hangquoctai.myharavan.com',
+    };
+    const rawBody = Buffer.from(JSON.stringify(body));
+    const hmac = crypto
+      .createHmac('sha256', 'webhook-secret')
+      .update(rawBody)
+      .digest('base64');
+
+    const result = await service.handleWebhook({
+      rawBody,
+      body,
+      query: {},
+      headers: {
+        'x-haravan-hmacsha256': hmac,
+        'x-haravan-topic': 'app/uninstalled',
+      },
+    } as unknown as Request & { rawBody: Buffer });
+
+    expect(result).toEqual(
+      expect.objectContaining({ ok: true, orgid: 'org_1', uninstalled: true }),
+    );
+    expect(db.clearTokensForUninstall).toHaveBeenCalledWith('org_1');
+    expect(storeService.deactivateStore).toHaveBeenCalledWith('org_1');
+  });
+
+  it('re-throws when clearTokensForUninstall fails to prevent false success', async () => {
+    const { service, db } = createService();
+    db.clearTokensForUninstall.mockRejectedValueOnce(
+      new Error('DB connection dead'),
+    );
+    const body = {
+      orgid: 'org_1',
+    };
+    const rawBody = Buffer.from(JSON.stringify(body));
+    const hmac = crypto
+      .createHmac('sha256', 'webhook-secret')
+      .update(rawBody)
+      .digest('base64');
+
+    await expect(
+      service.handleWebhook({
+        rawBody,
+        body,
+        query: {},
+        headers: {
+          'x-haravan-hmacsha256': hmac,
+          'x-haravan-topic': 'app/uninstalled',
+        },
+      } as unknown as Request & { rawBody: Buffer }),
+    ).rejects.toThrow('DB connection dead');
+  });
   it('handles shop update webhook and resyncs domain mapping', async () => {
     const { service, redis, storeService } = createService();
     const body = {
@@ -534,4 +609,82 @@ describe('HaravanService OAuth security', () => {
       redis.get('haravan:checkorders:shop_domain:hangquoctai.myharavan.com'),
     ).toBe('org_1');
   });
+
+describe('HaravanService order webhooks', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  const makeWebhookReq = (topic: string, body: Record<string, unknown>) => {
+    const rawBody = Buffer.from(JSON.stringify(body));
+    const hmac = crypto
+      .createHmac('sha256', 'webhook-secret')
+      .update(rawBody)
+      .digest('base64');
+    return {
+      rawBody,
+      body,
+      query: {},
+      headers: {
+        'x-haravan-hmacsha256': hmac,
+        'x-haravan-topic': topic,
+        'x-haravan-org-id': 'org_test_1',
+      },
+    } as unknown as Request & { rawBody: Buffer };
+  };
+
+  it('upserts order index on orders/create and orders/updated', async () => {
+    const { service, orderIndexService } = createService();
+    const orderData = {
+      id: 12345,
+      order_number: 1001,
+      name: '#1001',
+      phone: '0901234567',
+    };
+
+    const reqCreate = makeWebhookReq('orders/create', { orgid: 'org_test_1', ...orderData });
+    const resultCreate = await service.handleWebhook(reqCreate);
+
+    expect(resultCreate).toEqual(
+      expect.objectContaining({ ok: true, topic: 'orders/create', orgid: 'org_test_1' }),
+    );
+    expect(orderIndexService.upsertOrder).toHaveBeenCalledWith(
+      'org_test_1',
+      expect.objectContaining({ id: 12345 }),
+    );
+
+    const reqUpdate = makeWebhookReq('orders/updated', { orgid: 'org_test_1', order: orderData });
+    const resultUpdate = await service.handleWebhook(reqUpdate);
+
+    expect(resultUpdate).toEqual(
+      expect.objectContaining({ ok: true, topic: 'orders/updated', orgid: 'org_test_1' }),
+    );
+    expect(orderIndexService.upsertOrder).toHaveBeenCalledWith(
+      'org_test_1',
+      expect.objectContaining({ id: 12345 }),
+    );
+  });
+
+  it('deletes order index on orders/delete', async () => {
+    const { service, orderIndexService } = createService();
+    const reqDelete = makeWebhookReq('orders/delete', { orgid: 'org_test_1', id: 12345 });
+    const result = await service.handleWebhook(reqDelete);
+
+    expect(result).toEqual(
+      expect.objectContaining({ ok: true, topic: 'orders/delete', orgid: 'org_test_1', deleted: true }),
+    );
+    expect(orderIndexService.deleteOrder).toHaveBeenCalledWith('org_test_1', '12345');
+  });
+
+  it('handles unknown order payload shape without throwing', async () => {
+    const { service, orderIndexService } = createService();
+    const reqMalformed = makeWebhookReq('orders/create', { orgid: 'org_test_1' });
+    const result = await service.handleWebhook(reqMalformed);
+
+    expect(result).toEqual(
+      expect.objectContaining({ ok: true }),
+    );
+    expect(orderIndexService.upsertOrder).not.toHaveBeenCalled();
+  });
+});
 });

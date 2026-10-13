@@ -8,6 +8,7 @@ import { LookupController } from './controllers/lookup.controller';
 import { AdminController } from './controllers/admin.controller';
 import { StoreService } from './services/store.service';
 import { HaravanOrderService } from './services/haravan-order.service';
+import { OrderIndexService } from './services/order-index.service';
 import { LookupService } from './services/lookup.service';
 import { MaskingService } from './services/masking.service';
 import { RateLimitService } from './services/rate-limit.service';
@@ -20,13 +21,14 @@ import { ShopAuthGuard } from '../common/guards/shop-auth.guard';
   controllers: [LookupController, AdminController],
   providers: [
     StoreService,
+    OrderIndexService,
     HaravanOrderService,
     LookupService,
     MaskingService,
     RateLimitService,
     ShopAuthGuard,
   ],
-  exports: [StoreService],
+  exports: [StoreService, OrderIndexService, HaravanOrderService],
 })
 export class OrderLookupModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {

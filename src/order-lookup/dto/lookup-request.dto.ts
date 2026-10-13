@@ -60,7 +60,7 @@ export class LookupRequestDto {
   @IsString()
   @MinLength(3)
   @MaxLength(30)
-  @Matches(/^[A-Za-z0-9#-]{1,30}$/, { message: 'Mã đơn hàng không hợp lệ' })
+  @Matches(/^[A-Za-z0-9#_\/-]{1,30}$/, { message: 'Mã đơn hàng không hợp lệ' })
   order_code?: string;
 
   @IsOptional()

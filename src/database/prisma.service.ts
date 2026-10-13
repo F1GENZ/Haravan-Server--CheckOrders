@@ -12,7 +12,7 @@ import type {
   StoreSettings,
 } from '../order-lookup/services/store.service';
 
-type EncryptedValue = {
+export type EncryptedValue = {
   ciphertext: string;
   iv: string;
   tag: string;
@@ -139,6 +139,10 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  get client(): PrismaClient | null {
+    return this.prisma;
+  }
+
   private resolveEncryptionKey(): Buffer | null {
     const raw = String(
       this.config.get<string>('DATA_ENCRYPTION_KEY') || '',
@@ -154,7 +158,7 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
     return crypto.createHash('sha256').update(raw).digest();
   }
 
-  private encrypt(value: string): EncryptedValue | null {
+  encrypt(value: string): EncryptedValue | null {
     if (!this.encryptionKey || !value) return null;
     const iv = crypto.randomBytes(12);
     const cipher = crypto.createCipheriv('aes-256-gcm', this.encryptionKey, iv);
@@ -169,19 +173,22 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  private decrypt(input: {
+  decrypt(input: {
     accessTokenCiphertext?: string | null;
     accessTokenIv?: string | null;
     accessTokenTag?: string | null;
+    ciphertext?: string | null;
+    iv?: string | null;
+    tag?: string | null;
   }): string {
     return this.decryptParts(
-      input.accessTokenCiphertext,
-      input.accessTokenIv,
-      input.accessTokenTag,
+      input.ciphertext ?? input.accessTokenCiphertext,
+      input.iv ?? input.accessTokenIv,
+      input.tag ?? input.accessTokenTag,
     );
   }
 
-  private decryptParts(
+  decryptParts(
     ciphertext?: string | null,
     iv?: string | null,
     tag?: string | null,
@@ -208,6 +215,33 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+
+  resolveLookupHashKey(): Buffer {
+    const raw = String(
+      this.config.get<string>('LOOKUP_HASH_SECRET') ||
+        this.config.get<string>('DATA_ENCRYPTION_KEY') ||
+        '',
+    ).trim();
+    if (!raw) {
+      return crypto
+        .createHash('sha256')
+        .update('checkorder-hash-default')
+        .digest();
+    }
+    try {
+      if (/^[a-f0-9]{64}$/i.test(raw)) return Buffer.from(raw, 'hex');
+      const decoded = Buffer.from(raw, 'base64');
+      if (decoded.length === 32) return decoded;
+    } catch {
+      // Fall through to hash-based normalization.
+    }
+    return crypto.createHash('sha256').update(raw).digest();
+  }
+
+  hashPhone(normalizedPhone: string): string {
+    const key = this.resolveLookupHashKey();
+    return crypto.createHmac('sha256', key).update(normalizedPhone).digest('hex');
+  }
   private hash(value: unknown): string | null {
     const raw = stringValue(value).toLowerCase();
     if (!raw) return null;
@@ -599,7 +633,7 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
   async markShopInactive(orgid: string): Promise<void> {
     if (!this.prisma) return;
     try {
-      await this.prisma.shop.update({
+      await this.prisma.shop.updateMany({
         where: { orgid },
         data: {
           isActive: false,
@@ -610,6 +644,49 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
       this.logger.warn(
         `DB shop deactivate skipped: ${this.getErrorMessage(error)}`,
       );
+    }
+  }
+
+  async clearTokensForUninstall(orgid: string): Promise<void> {
+    if (!this.prisma) return;
+    try {
+      await this.prisma.$transaction([
+        this.prisma.shop.updateMany({
+          where: { orgid },
+          data: {
+            accessTokenCiphertext: null,
+            accessTokenIv: null,
+            accessTokenTag: null,
+            isActive: false,
+            status: 'uninstalled',
+          },
+        }),
+        this.prisma.appInstall.updateMany({
+          where: { orgid },
+          data: {
+            accessTokenCiphertext: null,
+            accessTokenIv: null,
+            accessTokenTag: null,
+            refreshTokenCiphertext: null,
+            refreshTokenIv: null,
+            refreshTokenTag: null,
+            tokenExpiresAt: null,
+            status: 'uninstalled',
+          },
+        }),
+        this.prisma.orderIndex.deleteMany({
+          where: { orgid },
+        }),
+        this.prisma.orderSyncState.deleteMany({
+          where: { orgid },
+        }),
+      ]);
+      this.logger.log(`DB tokens cleared for uninstalled orgid=${orgid}`);
+    } catch (error) {
+      this.logger.error(
+        `DB token clearing on uninstall failed: ${this.getErrorMessage(error)}`,
+      );
+      throw error;
     }
   }
 

@@ -1,13 +1,14 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { RedisService } from '../../redis/redis.service';
 import axios, { AxiosError } from 'axios';
 import * as crypto from 'crypto';
 import { normalizeLookupPhone } from '../utils/phone.util';
+import { OrderIndexService } from './order-index.service';
 
 // ─── Types ───
 
-interface HaravanOrder {
+export interface HaravanOrder {
   id: number;
   order_number: number;
   name: string;
@@ -80,8 +81,9 @@ export class HaravanOrderService {
   constructor(
     private readonly configService: ConfigService,
     private readonly redis: RedisService,
+    @Optional()
+    private readonly orderIndexService?: OrderIndexService,
   ) {}
-
   /**
    * Look up orders by phone and/or order code.
    * Caches filtered lookup results briefly, then refetches on cache misses.
@@ -96,6 +98,37 @@ export class HaravanOrderService {
     const startedAt = Date.now();
     const normalizedPhone = phone ? this.normalizePhone(phone) : '';
     const normalizedCode = orderCode ? orderCode.replace(/^#/, '').trim() : '';
+
+    if (
+      this.orderIndexService &&
+      (await this.orderIndexService.isReady(storeId))
+    ) {
+      const orders = await this.orderIndexService.search(
+        storeId,
+        normalizedPhone,
+        normalizedCode,
+        maxOrders,
+      );
+      this.logger.debug(
+        `DB index hit for store ${storeId} (${orders.length} orders)`,
+      );
+      await this.saveTelemetry(storeId, {
+        cache_status: 'db_hit',
+        result_count: orders.length,
+        pages_scanned: 0,
+        fallback_used: false,
+        duration_ms: Date.now() - startedAt,
+      });
+      return orders;
+    }
+
+    if (this.orderIndexService) {
+      void this.orderIndexService.ensureBackfill(storeId).catch((err) => {
+        this.logger.warn(
+          `Background backfill trigger failed for ${storeId}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      });
+    }
     const cacheKey = this.buildCacheKey(
       storeId,
       normalizedPhone,
@@ -150,7 +183,10 @@ export class HaravanOrderService {
     let pagesScanned = recentResult.pagesScanned;
     let fallbackUsed = false;
 
-    if (filtered.length === 0 && normalizedCode.length >= 4) {
+    if (
+      filtered.length === 0 &&
+      (normalizedPhone || normalizedCode.length >= 4)
+    ) {
       fallbackUsed = true;
       const fallbackLookbackDays = this.getPositiveConfig(
         'ORDER_LOOKUP_FALLBACK_LOOKBACK_DAYS',

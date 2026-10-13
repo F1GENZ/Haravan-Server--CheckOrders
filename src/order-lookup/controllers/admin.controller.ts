@@ -1,3 +1,4 @@
+import { serializeForScript } from '../utils/script-json.util';
 import {
   Controller,
   Get,
@@ -225,11 +226,11 @@ export class AdminController {
     }
 
     html = html.replace(
-      /\{\{\s*settings\.f1g_order_api_url\s*\|\s*default:\s*'[^']*'\s*\}\}/g,
+      /\{\{\s*settings\.f1g_order_api_url(?:\s*\|\s*default:\s*('[^']*'|"[^"]*"))?\s*\}\}/g,
       widgetApiUrl(),
     );
     html = html.replace(
-      /\{\{\s*settings\.f1g_order_shop\s*\|\s*default:\s*'[^']*'\s*\}\}/g,
+      /\{\{\s*settings\.f1g_order_shop(?:\s*\|\s*default:\s*('[^']*'|"[^"]*"))?\s*\}\}/g,
       publicShopIdentifier(store),
     );
 
@@ -241,15 +242,37 @@ export class AdminController {
   <style>html,body{margin:0;padding:0;height:100%;background:transparent}body{display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box}</style>
 </head>
 <body>
-<script>window.__f1gConfig=${JSON.stringify({
+<script>window.__f1gConfig=${serializeForScript({
       preview_enabled: true,
+      widget_enabled: settings.widget_enabled,
       widget_display_mode:
         settings.widget_display_mode === 'trigger'
           ? 'popup'
           : settings.widget_display_mode || 'inline',
       widget_trigger_action: settings.widget_trigger_action || 'modal',
       widget_trigger_link_url: settings.widget_trigger_link_url || '',
+      lookup_method: settings.lookup_method || 'phone_and_code',
+      visible_fields: settings.visible_fields || [
+        'order_number',
+        'status',
+        'created_at',
+        'total_price',
+        'fulfillment_status',
+        'tracking_info',
+        'customer_name',
+        'line_items',
+        'phone',
+        'email',
+        'shipping_address',
+      ],
+      max_orders: settings.max_orders || 5,
+      mask_phone: settings.mask_phone !== false,
+      mask_email: settings.mask_email !== false,
+      mask_address: settings.mask_address !== false,
+      rebuy_enabled: settings.rebuy_enabled !== false,
+      theme_color: settings.theme_color || '#4361ee',
       theme_text_color: settings.theme_text_color || '#ffffff',
+      widget_texts: settings.widget_texts || {},
       public_shop: publicShopIdentifier(store),
     })};</script>
 ${html}

@@ -30,6 +30,7 @@ export interface StoreSettings {
   widget_trigger_link_url: string;
   lookup_method: LookupMethod;
   visible_fields: VisibleField[];
+  visible_fields_version?: number;
   max_orders: number;
   mask_phone: boolean;
   mask_email: boolean;
@@ -40,6 +41,7 @@ export interface StoreSettings {
   rebuy_enabled: boolean;
 }
 
+const VISIBLE_FIELDS_VERSION = 2;
 const STORE_PREFIX = 'haravan:checkorders:store';
 const SETTINGS_PREFIX = 'haravan:checkorders:settings';
 const DOMAIN_INDEX_PREFIX = 'haravan:checkorders:domain';
@@ -83,8 +85,11 @@ const DEFAULT_SETTINGS: StoreSettings = {
     'created_at',
     'total_price',
     'fulfillment_status',
+    'tracking_info',
+    'customer_name',
     'line_items',
   ],
+  visible_fields_version: VISIBLE_FIELDS_VERSION,
   max_orders: 5,
   mask_phone: true,
   mask_email: true,
@@ -170,6 +175,28 @@ export class StoreService {
       },
       {} as Record<string, string>,
     );
+  }
+
+  isEntitled(
+    store: Pick<StoreRecord, 'status' | 'plan' | 'expires_at'>,
+    now = Date.now(),
+  ): boolean {
+    const status = String(store.status || 'trial').toLowerCase();
+    if (
+      [
+        'needs_reinstall',
+        'unactive',
+        'canceled',
+        'cancelled',
+        'expired',
+        'declined',
+      ].includes(status)
+    ) {
+      return false;
+    }
+    if (String(store.plan || '').toLowerCase() === 'pro') return true;
+    const expiresAt = store.expires_at ? Date.parse(store.expires_at) : NaN;
+    return !(Number.isFinite(expiresAt) && expiresAt <= now);
   }
 
   private toIsoDate(value: unknown): string | undefined {
@@ -381,6 +408,7 @@ export class StoreService {
 
     const updated: StoreRecord = {
       ...existing,
+      access_token: '',
       is_active: false,
       status: 'uninstalled',
     };
@@ -472,6 +500,23 @@ export class StoreService {
         String((durableSettings as Partial<StoreSettings>).widget_trigger_action),
       )
     ) {
+      needsSave = true;
+    }
+
+    if (durableSettings.visible_fields_version !== VISIBLE_FIELDS_VERSION) {
+      const legacy = Array.isArray(durableSettings.visible_fields)
+        ? durableSettings.visible_fields
+        : DEFAULT_SETTINGS.visible_fields;
+      const upgraded = [...legacy];
+      if (!upgraded.includes('customer_name')) upgraded.push('customer_name');
+      if (
+        legacy.includes('fulfillment_status') &&
+        !upgraded.includes('tracking_info')
+      ) {
+        upgraded.push('tracking_info');
+      }
+      merged.visible_fields = upgraded;
+      merged.visible_fields_version = VISIBLE_FIELDS_VERSION;
       needsSave = true;
     }
 

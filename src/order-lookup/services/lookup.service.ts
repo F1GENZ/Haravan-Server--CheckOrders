@@ -128,6 +128,14 @@ export class LookupService {
       };
     }
 
+    if (!this.storeService.isEntitled(store)) {
+      return {
+        success: false,
+        error: 'subscription_expired',
+        message: 'Ứng dụng đã hết hạn sử dụng. Vui lòng liên hệ chủ shop.',
+      };
+    }
+
     // 2. Get store settings
     const settings = await this.storeService.getSettings(store.org_id);
     if (!settings.widget_enabled) {
@@ -242,6 +250,20 @@ export class LookupService {
           masked,
           settings.visible_fields,
         );
+        if (settings.rebuy_enabled !== false) {
+          const rebuyItems = (
+            normalized.line_items as
+              | Array<{ variant_id?: number; quantity?: number; title?: string }>
+              | undefined
+          )
+            ?.filter((item) => item.variant_id)
+            .map((item) => ({
+              variant_id: item.variant_id,
+              quantity: item.quantity,
+              title: item.title,
+            }));
+          if (rebuyItems?.length) filtered.rebuy_items = rebuyItems;
+        }
         return filtered as unknown as OrderResult;
       });
 
@@ -430,11 +452,17 @@ export class LookupService {
       class: 'pending',
     };
 
-    const fmtPrice = (v: unknown) =>
-      v ? Number(v).toLocaleString('vi-VN') + '₫' : undefined;
+    const fmtPrice = (v: unknown) => {
+      if (v === undefined || v === null || v === '') return undefined;
+      const amount = Number(v);
+      return Number.isFinite(amount)
+        ? amount.toLocaleString('vi-VN') + '₫'
+        : undefined;
+    };
     const fmtDate = (v: unknown) =>
       v
         ? new Date(v as string).toLocaleString('vi-VN', {
+            timeZone: 'Asia/Ho_Chi_Minh',
             day: '2-digit',
             month: '2-digit',
             year: 'numeric',
@@ -551,7 +579,7 @@ export class LookupService {
             });
           }
           numbers.forEach((number, idx) => {
-            if (!number) return;
+            if (!number || number === directNumber) return;
             rows.push({
               tracking_number: number,
               tracking_url: urls[idx],
@@ -646,8 +674,10 @@ export class LookupService {
       // Prices
       subtotal_price: fmtPrice(order.subtotal_price),
       total_price: fmtPrice(order.total_price),
-      total_discounts: fmtPrice(order.total_discounts),
-      total_tax: fmtPrice(order.total_tax),
+      total_discounts: Number(order.total_discounts)
+        ? fmtPrice(order.total_discounts)
+        : undefined,
+      total_tax: Number(order.total_tax) ? fmtPrice(order.total_tax) : undefined,
       total_shipping: fmtPrice(order.total_shipping_price),
       currency: str(order.currency),
 

@@ -1,3 +1,4 @@
+import { serializeForScript } from '../utils/script-json.util';
 import {
   Controller,
   Post,
@@ -147,7 +148,8 @@ export class LookupController {
     const triggerLinkUrl = String(
       settings.widget_trigger_link_url || '',
     ).trim();
-    const widgetEnabled = settings.widget_enabled !== false;
+    const widgetEnabled =
+      settings.widget_enabled !== false && this.storeService.isEntitled(store);
 
     const js = `
 (function () {
@@ -168,6 +170,10 @@ export class LookupController {
   var triggerLinkUrl = ${JSON.stringify(triggerLinkUrl)};
   var widgetEnabled = ${JSON.stringify(widgetEnabled)};
   if (document.getElementById(frameId)) return;
+  if (!widgetEnabled) {
+    if (displayMode === "trigger") syncTriggerButtons(false);
+    return;
+  }
   var frameLoaded = false;
   var pendingOpen = false;
 
@@ -357,25 +363,26 @@ export class LookupController {
       return;
     }
 
+    var added = [];
+    var failed = [];
     items.reduce(function (promise, item) {
-      return promise.then(function () { return addItem(item); });
-    }, Promise.resolve())
-      .then(function () {
-        postBack(event.source, event.origin, {
-          type: "f1g_rebuy_add_to_cart_done",
-          requestId: requestId,
-          success: true
-        });
-        window.location.href = "/cart";
-      })
-      .catch(function () {
-        postBack(event.source, event.origin, {
-          type: "f1g_rebuy_add_to_cart_done",
-          requestId: requestId,
-          success: false,
-          message: "add_to_cart_failed"
-        });
+      return promise.then(function () {
+        return addItem(item).then(
+          function () { added.push(item.id); },
+          function () { failed.push(item.id); }
+        );
       });
+    }, Promise.resolve()).then(function () {
+      postBack(event.source, event.origin, {
+        type: "f1g_rebuy_add_to_cart_done",
+        requestId: requestId,
+        success: added.length > 0,
+        added: added,
+        failed: failed,
+        message: added.length ? "" : "add_to_cart_failed"
+      });
+      if (added.length && !failed.length) window.location.href = "/cart";
+    });
   });
 })();`;
 
@@ -410,11 +417,11 @@ export class LookupController {
     // Replace Liquid template tags
     const apiUrl = widgetApiUrl();
     html = html.replace(
-      /\{\{\s*settings\.f1g_order_api_url\s*\|\s*default:\s*'[^']*'\s*\}\}/g,
+      /\{\{\s*settings\.f1g_order_api_url(?:\s*\|\s*default:\s*'[^']*')?\s*\}\}/g,
       apiUrl,
     );
     html = html.replace(
-      /\{\{\s*settings\.f1g_order_shop\s*\|\s*default:\s*'[^']*'\s*\}\}/g,
+      /\{\{\s*settings\.f1g_order_shop(?:\s*\|\s*default:\s*'[^']*')?\s*\}\}/g,
       publicShop,
     );
 
@@ -434,7 +441,7 @@ export class LookupController {
 
     // Fetch store settings and inject as config
     const settings = await this.storeService.getSettings(store.org_id);
-    const configPayload = JSON.stringify({
+    const configPayload = serializeForScript({
       lookup_method: settings.lookup_method || 'phone_and_code',
       visible_fields: Array.isArray(settings.visible_fields)
         ? settings.visible_fields
@@ -445,6 +452,8 @@ export class LookupController {
             'total_price',
             'fulfillment_status',
             'line_items',
+            'tracking_info',
+            'customer_name',
             'phone',
             'email',
             'shipping_address',
@@ -453,7 +462,8 @@ export class LookupController {
       mask_email: settings.mask_email !== false,
       mask_address: settings.mask_address !== false,
       max_orders: settings.max_orders || 5,
-      widget_enabled: settings.widget_enabled !== false,
+      widget_enabled:
+        settings.widget_enabled !== false && this.storeService.isEntitled(store),
       widget_display_mode: settings.widget_display_mode || 'inline',
       widget_trigger_action: settings.widget_trigger_action || 'modal',
       widget_trigger_link_url: settings.widget_trigger_link_url || '',

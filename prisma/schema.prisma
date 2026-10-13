@@ -157,3 +157,39 @@ model WebhookEvent {
   @@index([orgid, status, receivedAt])
   @@index([status, receivedAt])
 }
+
+model OrderIndex {
+  id                String    @id @default(cuid())
+  orgid             String
+  haravanOrderId    String
+  orderNumber       String
+  orderName         String
+  phoneKeys         String[]
+  payloadCiphertext String
+  payloadIv         String
+  payloadTag        String
+  haravanCreatedAt  DateTime?
+  haravanUpdatedAt  DateTime?
+  cancelledAt       DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@unique([orgid, haravanOrderId])
+  @@index([orgid, orderNumber])
+  @@index([orgid, orderName])
+  @@index([phoneKeys], type: Gin)
+  @@index([orgid, haravanCreatedAt])
+}
+
+model OrderSyncState {
+  id           String    @id @default(cuid())
+  orgid        String    @unique
+  status       String    @default("pending")
+  nextPage     Int       @default(1)
+  indexedCount Int       @default(0)
+  startedAt    DateTime?
+  finishedAt   DateTime?
+  lastError    String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+}

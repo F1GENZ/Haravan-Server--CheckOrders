@@ -5,6 +5,11 @@ export interface OrderResult {
   created_at?: string;
   total_price?: string;
   fulfillment_status?: string;
+  rebuy_items?: Array<{
+    variant_id: number;
+    quantity: number;
+    title?: string;
+  }>;
   line_items?: Array<{
     title: string;
     quantity: number;

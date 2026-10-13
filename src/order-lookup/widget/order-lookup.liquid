@@ -3,8 +3,8 @@
 <div
   id='f1g-ot'
   class='f1g-ot'
-  data-api='{{ settings.f1g_order_api_url | default: 'https://api-checkorders.f1genz.dev' }}'
-  data-shop='{{ settings.f1g_order_shop | default: '' }}'
+  data-api='{{ settings.f1g_order_api_url }}'
+  data-shop='{{ settings.f1g_order_shop }}'
 >
   <button id='f1g-popup-btn' class='f1g-ot__popup-btn' type='button' aria-expanded='false'>
     <svg viewBox='0 0 24 24' fill='none' aria-hidden='true'>
@@ -1172,62 +1172,6 @@
       return cfg.preview_enabled === true;
     }
 
-    function randomizeOrders(orders) {
-      var cloned = (orders || []).slice();
-      for (var i = cloned.length - 1; i > 0; i--) {
-        var j = Math.floor(Math.random() * (i + 1));
-        var tmp = cloned[i];
-        cloned[i] = cloned[j];
-        cloned[j] = tmp;
-      }
-      return cloned;
-    }
-
-    function buildPreviewFallbackOrders() {
-      var day = String(Math.floor(Math.random() * 27) + 1).padStart(2, '0');
-      var month = String(Math.floor(Math.random() * 12) + 1).padStart(2, '0');
-      return [
-        {
-          order_number: '#10' + String(Math.floor(Math.random() * 900) + 100),
-          status_text: T.status_paid,
-          status_class: 'success',
-          financial_status: 'paid',
-          fulfillment_status: T.fulfill_partial,
-          fulfillment_status_raw: 'partial',
-          created_at: day + '/' + month + '/2026 10:15',
-          subtotal_price: '2.200.000₫',
-          total_price: '2.450.000₫',
-          total_discounts: '50.000₫',
-          gateway: 'COD',
-          customer_name: 'Preview Customer',
-          phone: '0901234567',
-          email: 'preview@f1genz.dev',
-          shipping_address: '123 Nguyen Hue, Quan 1, TP.HCM',
-          line_items: [
-            {
-              title: 'Fender Player Stratocaster',
-              variant_title: 'Sunburst',
-              sku: 'FEN-001',
-              variant_id: 1061514693,
-              price: '1.950.000₫',
-              quantity: 1,
-              image: 'https://dummyimage.com/96x96/e2e8f0/64748b.png&text=F1',
-            },
-            {
-              title: 'Ernie Ball Slinky',
-              variant_title: '10-46',
-              sku: 'EB-2221',
-              variant_id: 1061514629,
-              price: '250.000₫',
-              quantity: 2,
-              image: 'https://dummyimage.com/96x96/e2e8f0/64748b.png&text=E2',
-            },
-          ],
-          tracking: [{ carrier: 'GHTK', tracking_number: 'S22.500123', tracking_url: '#' }],
-          note: 'Preview mode',
-        },
-      ];
-    }
 
     btn.addEventListener('click', function () {
       var phone = normalizePhone(phoneEl.value),
@@ -1238,11 +1182,6 @@
         setTimeout(function () {
           setLoading(false);
           hideCaptcha();
-          if (!allOrders || allOrders.length === 0) {
-            allOrders = buildPreviewFallbackOrders();
-          } else {
-            allOrders = randomizeOrders(allOrders);
-          }
           curPage = 1;
           renderPage();
         }, 120);
@@ -1406,17 +1345,27 @@
     }
 
     function getRebuyItems(order) {
-      if (!order || !Array.isArray(order.line_items)) return [];
-      var qtyByVariant = {};
-      order.line_items.forEach(function (item) {
+      if (!order) return [];
+      var source = Array.isArray(order.rebuy_items)
+        ? order.rebuy_items
+        : Array.isArray(order.line_items)
+          ? order.line_items
+          : [];
+      var byVariant = {};
+      var keys = [];
+      source.forEach(function (item) {
         var variantId = toPositiveInt(item.variant_id);
         var qty = toPositiveInt(item.quantity) || 1;
         if (!variantId) return;
         var key = String(variantId);
-        qtyByVariant[key] = (qtyByVariant[key] || 0) + qty;
+        if (!byVariant[key]) {
+          byVariant[key] = { id: variantId, quantity: 0, title: item.title || '' };
+          keys.push(key);
+        }
+        byVariant[key].quantity += qty;
       });
-      return Object.keys(qtyByVariant).map(function (variantId) {
-        return { id: Number(variantId), quantity: qtyByVariant[variantId] };
+      return keys.map(function (key) {
+        return byVariant[key];
       });
     }
 
@@ -1526,7 +1475,13 @@
 
           if (data.type === 'f1g_rebuy_add_to_cart_done') {
             cleanup();
-            if (data.success === true) resolve();
+            var hasDetail = Array.isArray(data.added) || Array.isArray(data.failed);
+            if (hasDetail) {
+              var addedList = Array.isArray(data.added) ? data.added : [];
+              var failedList = Array.isArray(data.failed) ? data.failed : [];
+              if (addedList.length) resolve({ added: addedList, failed: failedList });
+              else reject(new Error(data.message || 'add_to_cart_failed'));
+            } else if (data.success === true) resolve(null);
             else reject(new Error(data.message || 'add_to_cart_failed'));
           }
         }
@@ -1547,16 +1502,33 @@
       });
     }
 
+    function addItemsIndividually(base, items) {
+      var added = [];
+      var failed = [];
+      return items
+        .reduce(function (promise, item) {
+          return promise.then(function () {
+            return addSingleItemToCart(base, item).then(
+              function () {
+                added.push(item.id);
+              },
+              function () {
+                failed.push(item.id);
+              },
+            );
+          });
+        }, Promise.resolve())
+        .then(function () {
+          return { added: added, failed: failed };
+        });
+    }
+
     function addRebuyItemsToCart(base, items) {
       return requestParentAddToCart(items).catch(function (error) {
         // bridge_unavailable = not framed or no parentOrigin → try direct fetch (same-origin context)
         // bridge_timeout = framed but parent has no listener → cross-origin fetch would fail, skip
         if (!error || error.message !== 'bridge_unavailable') throw error;
-        return items.reduce(function (promise, item) {
-          return promise.then(function () {
-            return addSingleItemToCart(base, item);
-          });
-        }, Promise.resolve());
+        return addItemsIndividually(base, items);
       });
     }
 
@@ -1576,6 +1548,31 @@
       return 'Không thể thêm sản phẩm vào giỏ hàng. Vui lòng thử lại.';
     }
 
+    function showRebuyNotice(btnNode, base, addedCount, titles) {
+      var host = btnNode.parentNode;
+      if (!host) return;
+      var prev = host.querySelector('.f1g-ot__rebuy-notice');
+      if (prev) host.removeChild(prev);
+      var notice = document.createElement('div');
+      notice.className = 'f1g-ot__rebuy-notice';
+      notice.style.cssText =
+        'width:100%;flex-basis:100%;margin-top:.6rem;font-size:.82rem;color:#92400e;background:#fffbeb;padding:.5rem .7rem;border-radius:8px;border-left:3px solid #f59e0b';
+      var text = document.createElement('div');
+      text.textContent =
+        'Đã thêm ' + addedCount + ' sản phẩm vào giỏ hàng. Hết hàng hoặc không còn bán: ' + titles.join(', ') + '.';
+      notice.appendChild(text);
+      var cartBtn = document.createElement('button');
+      cartBtn.type = 'button';
+      cartBtn.className = 'f1g-ot__action-btn f1g-ot__action-btn--primary';
+      cartBtn.style.marginTop = '.5rem';
+      cartBtn.textContent = 'Xem giỏ hàng';
+      cartBtn.addEventListener('click', function () {
+        finishRebuy(base);
+      });
+      notice.appendChild(cartBtn);
+      host.appendChild(notice);
+    }
+
     function bindOrderActions() {
       listEl.querySelectorAll('[data-rebuy-index]').forEach(function (btnNode) {
         btnNode.addEventListener('click', function () {
@@ -1590,8 +1587,25 @@
           var base = getStoreBaseUrl(cfg);
           btnNode.disabled = true;
           addRebuyItemsToCart(base, items)
-            .then(function () {
-              finishRebuy(base);
+            .then(function (result) {
+              var failedIds = result && Array.isArray(result.failed) ? result.failed : [];
+              if (!failedIds.length) {
+                finishRebuy(base);
+                return;
+              }
+              var addedCount = items.length - failedIds.length;
+              var titles = items
+                .filter(function (item) {
+                  return failedIds.indexOf(item.id) >= 0;
+                })
+                .map(function (item) {
+                  return item.title || '#' + item.id;
+                });
+              if (addedCount <= 0) {
+                showErr('Các sản phẩm đã hết hàng hoặc không còn bán: ' + titles.join(', ') + '.');
+                return;
+              }
+              showRebuyNotice(btnNode, base, addedCount, titles);
             })
             .catch(function (error) {
               showErr(getRebuyErrorMessage(error));
@@ -1611,6 +1625,8 @@
         'created_at',
         'total_price',
         'fulfillment_status',
+        'tracking_info',
+        'customer_name',
         'line_items',
         'phone',
         'email',
@@ -1689,16 +1705,16 @@
         return '<div class="' + cls + '">' + esc(t) + '</div>';
       }
 
-      // Customer section
-      var showCustomer =
-        o.customer_name ||
+      // Customer section — only render if at least one contact field is visible and present
+      var hasCustomerContact =
+        (has('customer_name') && o.customer_name) ||
         (has('phone') && o.phone) ||
         (has('email') && o.email) ||
         (has('shipping_address') && o.shipping_address);
-      if (showCustomer) {
+      if (hasCustomerContact) {
         h += sepTitleTracked(T.sec_customer);
         h += '<div class="f1g-ot__info">';
-        if (o.customer_name) h += iCell(T.lbl_name, o.customer_name);
+        if (has('customer_name') && o.customer_name) h += iCell(T.lbl_name, o.customer_name);
         if (has('phone') && o.phone) h += iCell(T.lbl_phone, doMaskPhone ? maskPhone(o.phone) : o.phone);
         if (has('email') && o.email) h += iCell(T.lbl_email, doMaskEmail ? maskEmail(o.email) : o.email);
         h += '</div>';
@@ -1763,8 +1779,8 @@
           esc(translateFulfill(o.fulfillment_status_raw, o.fulfillment_status)) +
           '</span></div>';
       }
-      // Tracking info — always shown when available (independent of fulfillment_status visibility)
-      if (o.tracking && o.tracking.length) {
+      // Tracking info: gated by its own tracking_info field
+      if (has('tracking_info') && o.tracking && o.tracking.length) {
         o.tracking.forEach(function (t) {
           h +=
             '<div style="font-size:.78rem;color:#475569;margin-top:.35rem;padding:.3rem .7rem;background:#f8fafc;border-radius:6px">';
@@ -1944,10 +1960,13 @@
       pagingEl.style.display = 'none';
     }
     function esc(s) {
-      if (!s) return '';
-      var d = document.createElement('div');
-      d.textContent = String(s);
-      return d.innerHTML;
+      if (s === undefined || s === null || s === '') return '';
+      return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
     }
     function safeUrl(url) {
       if (!url) return '';

@@ -2,8 +2,10 @@ import {
   BadRequestException,
   UnauthorizedException,
   Injectable,
+  Inject,
   Logger,
   Optional,
+  forwardRef,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { RedisService } from '../redis/redis.service';
@@ -11,6 +13,7 @@ import { HaravanAPIService } from './haravan.api';
 import { StoreService } from '../order-lookup/services/store.service';
 import { NotificationService } from '../notification/notification.service';
 import { PrismaService } from '../database/prisma.service';
+import { OrderIndexService } from '../order-lookup/services/order-index.service';
 import axios from 'axios';
 import * as crypto from 'crypto';
 import type { Request, Response } from 'express';
@@ -295,6 +298,9 @@ export class HaravanService {
     private readonly notificationService?: NotificationService,
     @Optional()
     private readonly db?: PrismaService,
+    @Inject(forwardRef(() => OrderIndexService))
+    @Optional()
+    private readonly orderIndexService?: OrderIndexService,
   ) {}
 
   private getHaravanConfig(): HaravanConfig {
@@ -1544,13 +1550,34 @@ export class HaravanService {
     return Number.isFinite(quota) && quota > 0 ? quota : 500;
   }
 
+  async subscribeWebhooksForShop(orgid: string): Promise<void> {
+    try {
+      const accessToken = await this.resolveAccessToken(orgid);
+      await this.subscribeWebhooks(accessToken);
+      this.logger.log(`Webhooks subscribed for orgid=${orgid}`);
+    } catch (error) {
+      this.logger.warn(
+        `Failed to subscribe webhooks for orgid=${orgid}: ${getErrorMessage(error)}`,
+      );
+    }
+  }
+
   private async subscribeWebhooks(accessToken: string): Promise<void> {
     const webhookUrl = String(
       this.config.get<string>('HRV_WEBHOOK_URL') || '',
     ).trim();
     if (!webhookUrl || !this.shouldAutoSubscribeWebhook()) return;
 
-    const topics = ['app_subscriptions/update', 'app/uninstalled', 'shop/update'];
+    const topics = [
+      'app_subscriptions/update',
+      'app/uninstalled',
+      'shop/update',
+      'orders/create',
+      'orders/updated',
+      'orders/cancelled',
+      'orders/paid',
+      'orders/delete',
+    ];
 
     try {
       await axios.post(
@@ -1633,6 +1660,25 @@ export class HaravanService {
       return this.handleShopUpdatedWebhook(req, topic);
     }
 
+    if (
+      [
+        'orders/create',
+        'orders/updated',
+        'orders/cancelled',
+        'orders/paid',
+        'order/create',
+        'order/updated',
+        'order/cancelled',
+        'order/paid',
+      ].includes(normalizedTopic)
+    ) {
+      return this.handleOrderWebhook(req, topic);
+    }
+
+    if (['orders/delete', 'order/delete'].includes(normalizedTopic)) {
+      return this.handleOrderDeletedWebhook(req, topic);
+    }
+
     if (normalizedTopic !== 'app_subscriptions/update') {
       await this.db?.recordWebhook({
         topic: topic || 'unknown',
@@ -1656,6 +1702,9 @@ export class HaravanService {
         : {};
     const orgid = await this.resolveWebhookOrgid(req, body, body);
     if (!orgid) throw new BadRequestException('Missing orgid');
+
+    await this.db?.clearTokensForUninstall(orgid);
+    await this.orderIndexService?.purgeOrg(orgid);
 
     const appData = await this.getInstallSession(orgid);
     if (appData) {
@@ -1682,6 +1731,93 @@ export class HaravanService {
     });
     this.logger.log(`App uninstall handled for orgid=${orgid}`);
     return { ok: true, topic, orgid, uninstalled: true };
+  }
+
+  private async handleOrderWebhook(
+    req: RawBodyRequest,
+    topic: string,
+  ): Promise<Record<string, unknown>> {
+    const body =
+      typeof req.body === 'object' && req.body !== null
+        ? (req.body as Record<string, unknown>)
+        : {};
+
+    const orgid = await this.resolveWebhookOrgid(req, body, body);
+    if (!orgid) {
+      this.logger.warn(`Order webhook missing orgid for topic=${topic}`);
+      return { ok: true, ignored: true, reason: 'missing_orgid', topic };
+    }
+
+    const orderPayload =
+      typeof body.order === 'object' && body.order !== null
+        ? (body.order as Record<string, unknown>)
+        : body;
+
+    if (orderPayload.id !== undefined && orderPayload.id !== null) {
+      if (this.orderIndexService) {
+        try {
+          await this.orderIndexService.upsertOrder(orgid, orderPayload);
+        } catch (error) {
+          this.logger.warn(
+            `Failed to index order from webhook for orgid=${orgid}: ${getErrorMessage(error)}`,
+          );
+        }
+      }
+    }
+
+    await this.db?.recordWebhook({
+      topic,
+      orgid,
+      payload: body,
+      headers: this.pickWebhookHeaders(req),
+      status: 'processed',
+    });
+
+    return { ok: true, topic, orgid, processed: true };
+  }
+
+  private async handleOrderDeletedWebhook(
+    req: RawBodyRequest,
+    topic: string,
+  ): Promise<Record<string, unknown>> {
+    const body =
+      typeof req.body === 'object' && req.body !== null
+        ? (req.body as Record<string, unknown>)
+        : {};
+
+    const orgid = await this.resolveWebhookOrgid(req, body, body);
+    if (!orgid) {
+      this.logger.warn(`Order delete webhook missing orgid for topic=${topic}`);
+      return { ok: true, ignored: true, reason: 'missing_orgid', topic };
+    }
+
+    const orderPayload =
+      typeof body.order === 'object' && body.order !== null
+        ? (body.order as Record<string, unknown>)
+        : body;
+
+    const rawId = orderPayload.id ?? body.id;
+    if (rawId !== undefined && rawId !== null) {
+      if (this.orderIndexService) {
+        try {
+          await this.orderIndexService.deleteOrder(orgid, String(rawId));
+        } catch (error) {
+          this.logger.warn(
+            `Failed to delete order from index for orgid=${orgid}: ${getErrorMessage(error)}`,
+          );
+        }
+      }
+    }
+
+    await this.db?.recordWebhook({
+      topic,
+      orgid,
+      payload: body,
+      headers: this.pickWebhookHeaders(req),
+      status: 'processed',
+    });
+
+    return { ok: true, topic, orgid, deleted: true };
   }
 
   private async handleShopUpdatedWebhook(

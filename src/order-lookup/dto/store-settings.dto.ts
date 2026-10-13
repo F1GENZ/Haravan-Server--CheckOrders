@@ -26,6 +26,8 @@ export const VISIBLE_FIELD_OPTIONS = [
   'total_price',
   'line_items',
   'fulfillment_status',
+  'tracking_info',
+  'customer_name',
   'phone',
   'email',
   'shipping_address',
