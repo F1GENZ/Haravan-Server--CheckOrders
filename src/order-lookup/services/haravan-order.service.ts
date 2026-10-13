@@ -103,12 +103,44 @@ export class HaravanOrderService {
       this.orderIndexService &&
       (await this.orderIndexService.isReady(storeId))
     ) {
-      const orders = await this.orderIndexService.search(
+      const cacheKey = this.buildCacheKey(
+        storeId,
+        normalizedPhone,
+        normalizedCode,
+      );
+      const cached = await this.redis.get<CachedLookup>(cacheKey);
+      if (!Array.isArray(cached) && Array.isArray(cached?.orders)) {
+        await this.saveTelemetry(storeId, {
+          cache_status: 'hit',
+          result_count: cached.orders.length,
+          pages_scanned: 0,
+          fallback_used: false,
+          duration_ms: Date.now() - startedAt,
+        });
+        return cached.orders.slice(0, maxOrders);
+      }
+
+      const indexed = await this.orderIndexService.search(
         storeId,
         normalizedPhone,
         normalizedCode,
         maxOrders,
       );
+      const orders = await this.refreshIndexedOrders(
+        accessToken,
+        storeId,
+        indexed,
+      );
+      if (orders.length > 0) {
+        await this.redis.set(
+          cacheKey,
+          { orders },
+          this.getPositiveConfig(
+            'ORDER_LOOKUP_CACHE_SECONDS',
+            DEFAULT_CACHE_SECONDS,
+          ),
+        );
+      }
       this.logger.debug(
         `DB index hit for store ${storeId} (${orders.length} orders)`,
       );
@@ -248,6 +280,51 @@ export class HaravanOrderService {
     return normalizeLookupPhone(phone);
   }
 
+  private async refreshIndexedOrders(
+    accessToken: string,
+    storeId: string,
+    indexed: HaravanOrder[],
+  ): Promise<HaravanOrder[]> {
+    const ids = indexed.map((order) => order.id).filter(Boolean);
+    if (ids.length === 0) return indexed;
+
+    try {
+      const url =
+        `https://apis.haravan.com/com/orders.json` +
+        `?ids=${encodeURIComponent(ids.join(','))}` +
+        `&status=any&limit=${ids.length}`;
+      const response = await axios.get<HaravanOrdersResponse>(url, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+        timeout: 10_000,
+      });
+      const freshById = new Map(
+        (response.data?.orders ?? []).map((order) => [String(order.id), order]),
+      );
+      const fresh = indexed
+        .map((order) => freshById.get(String(order.id)))
+        .filter((order): order is HaravanOrder => Boolean(order));
+      for (const order of fresh) {
+        void this.orderIndexService
+          ?.upsertOrder(storeId, order)
+          .catch((err) =>
+            this.logger.warn(
+              `Index refresh failed for order ${order.id}: ${err instanceof Error ? err.message : String(err)}`,
+            ),
+          );
+      }
+      return fresh;
+    } catch (error: unknown) {
+      if (axios.isAxiosError(error) && error.response?.status === 401) {
+        this.logger.error('Haravan token expired or invalid');
+        throw new Error('HARAVAN_TOKEN_INVALID');
+      }
+      this.logger.warn(
+        `Live refresh of indexed orders failed for store ${storeId}; serving indexed copies: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return indexed;
+    }
+  }
+
   private buildCacheKey(
     storeId: string,
     phone: string,
@@ -299,7 +376,7 @@ export class HaravanOrderService {
         const url =
           `https://apis.haravan.com/com/orders.json` +
           `?created_at_min=${encodeURIComponent(createdAtMin)}` +
-          `&limit=50&page=${page}`;
+          `&status=any&limit=50&page=${page}`;
 
         const response = await axios.get<HaravanOrdersResponse>(url, {
           headers: { Authorization: `Bearer ${accessToken}` },

@@ -270,21 +270,37 @@ describe('HaravanOrderService DB order index integration', () => {
     jest.clearAllMocks();
   });
 
-  it('answers from DB and skips Haravan API and Redis when index is ready', async () => {
-    const redis = new RedisMock();
+  const createIndexedService = (indexed: Array<Record<string, unknown>>) => {
     const orderIndexServiceMock = {
       isReady: jest.fn().mockResolvedValue(true),
-      search: jest.fn().mockResolvedValue([
-        { id: 999, name: '#ORD-999', phone: '0901234567' },
-      ]),
+      search: jest.fn().mockResolvedValue(indexed),
+      upsertOrder: jest.fn().mockResolvedValue(undefined),
       ensureBackfill: jest.fn().mockResolvedValue(undefined),
     };
-
     const service = new HaravanOrderService(
       config,
-      redis as never,
+      new RedisMock() as never,
       orderIndexServiceMock as never,
     );
+    return { service, orderIndexServiceMock };
+  };
+
+  it('finds orders through the index but shows their current Haravan state', async () => {
+    const { service, orderIndexServiceMock } = createIndexedService([
+      { id: 999, name: '#ORD-999', fulfillment_status: 'notfulfilled' },
+    ]);
+    mockedAxios.get.mockResolvedValueOnce({
+      data: {
+        orders: [
+          {
+            id: 999,
+            name: '#ORD-999',
+            fulfillment_status: 'fulfilled',
+            cancelled_at: '2026-10-13T18:40:00Z',
+          },
+        ],
+      },
+    });
 
     const results = await service.lookupOrders(
       'token',
@@ -294,16 +310,60 @@ describe('HaravanOrderService DB order index integration', () => {
       5,
     );
 
-    expect(orderIndexServiceMock.isReady).toHaveBeenCalledWith('store_ready');
     expect(orderIndexServiceMock.search).toHaveBeenCalledWith(
       'store_ready',
       '0901234567',
       'ORD-999',
       5,
     );
+    const url = new URL(String(mockedAxios.get.mock.calls[0][0]));
+    expect(url.searchParams.get('ids')).toBe('999');
+    expect(url.searchParams.get('status')).toBe('any');
     expect(results).toHaveLength(1);
-    expect(results[0].id).toBe(999);
-    expect(mockedAxios.get).not.toHaveBeenCalled();
+    expect(results[0].cancelled_at).toBe('2026-10-13T18:40:00Z');
+    expect(orderIndexServiceMock.upsertOrder).toHaveBeenCalledWith(
+      'store_ready',
+      expect.objectContaining({ id: 999, fulfillment_status: 'fulfilled' }),
+    );
+  });
+
+  it('drops indexed orders that no longer exist on Haravan', async () => {
+    const { service } = createIndexedService([
+      { id: 1, name: '#1' },
+      { id: 2, name: '#2' },
+    ]);
+    mockedAxios.get.mockResolvedValueOnce({
+      data: { orders: [{ id: 2, name: '#2' }] },
+    });
+
+    const results = await service.lookupOrders('token', 'store_ready', '0901234567');
+
+    expect(results.map((order) => order.id)).toEqual([2]);
+  });
+
+  it('serves the indexed copy when Haravan is temporarily unreachable', async () => {
+    const { service } = createIndexedService([{ id: 5, name: '#5' }]);
+    mockedAxios.get.mockRejectedValueOnce(new Error('timeout'));
+
+    const results = await service.lookupOrders('token', 'store_ready', '0901234567');
+
+    expect(results.map((order) => order.id)).toEqual([5]);
+  });
+
+  it('reuses the cached refresh for repeated lookups', async () => {
+    const { service, orderIndexServiceMock } = createIndexedService([
+      { id: 7, name: '#7' },
+    ]);
+    mockedAxios.get.mockResolvedValueOnce({
+      data: { orders: [{ id: 7, name: '#7' }] },
+    });
+
+    await service.lookupOrders('token', 'store_ready', '0901234567');
+    const second = await service.lookupOrders('token', 'store_ready', '0901234567');
+
+    expect(second.map((order) => order.id)).toEqual([7]);
+    expect(mockedAxios.get).toHaveBeenCalledTimes(1);
+    expect(orderIndexServiceMock.search).toHaveBeenCalledTimes(1);
   });
 
   it('falls back to Haravan API and fires ensureBackfill when index is not ready', async () => {
