@@ -449,6 +449,7 @@ export class LookupService {
       shipping: 'Đang giao hàng',
       partial: 'Giao một phần',
       notfulfilled: 'Chưa giao hàng',
+      confirmed: 'Chờ lấy hàng',
       cancelled: 'Đã hủy giao hàng',
       canceled: 'Đã hủy giao hàng',
       restocked: 'Đã hủy giao hàng',
@@ -639,9 +640,30 @@ export class LookupService {
       ['cancelled', 'canceled', 'restocked', 'voided'].includes(
         rawFulfillmentStatus,
       );
+    const latestCarrierFulfillment = (fulfillments || [])
+      .filter((f) => str(f.carrier_status_code))
+      .sort((a, b) =>
+        String(a.created_at || '').localeCompare(String(b.created_at || '')),
+      )
+      .pop();
+    const carrierStatusCode =
+      str(latestCarrierFulfillment?.carrier_status_code)?.toLowerCase() || '';
+    const carrierStatusName = str(latestCarrierFulfillment?.carrier_status_name);
+    const carrierStage: Record<string, string> = {
+      readytopick: 'confirmed',
+      picking: 'confirmed',
+      cancel: 'confirmed',
+      delivering: 'shipping',
+      notmeetcustomer: 'shipping',
+      waitingforreturn: 'shipping',
+      return: 'shipping',
+      delivered: 'fulfilled',
+    };
     const normalizedFulfillmentStatus = cancelled
       ? 'cancelled'
-      : ['fulfilled', 'delivered', 'completed', 'success'].includes(
+      : carrierStage[carrierStatusCode]
+        ? carrierStage[carrierStatusCode]
+        : ['fulfilled', 'delivered', 'completed', 'success'].includes(
             rawFulfillmentStatus,
           )
         ? 'fulfilled'
@@ -669,7 +691,9 @@ export class LookupService {
       status_class: status.class,
       financial_status: financialStatus,
       fulfillment_status:
-        fulfillmentMap[normalizedFulfillmentStatus] || 'Chưa giao hàng',
+        (!cancelled && carrierStatusName) ||
+        fulfillmentMap[normalizedFulfillmentStatus] ||
+        'Chưa giao hàng',
       fulfillment_status_raw: normalizedFulfillmentStatus,
 
       // Dates

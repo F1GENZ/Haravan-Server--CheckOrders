@@ -335,6 +335,38 @@ describe('LookupService order normalization', () => {
     ]);
   });
 
+  it.each([
+    ['readytopick', 'Chờ lấy hàng', 'confirmed'],
+    ['delivering', 'Đang giao hàng', 'shipping'],
+    ['delivered', 'Đã giao hàng', 'fulfilled'],
+  ])(
+    'follows the carrier status %s instead of the order-level fulfilled flag',
+    async (code, name, stage) => {
+      const result = await lookupWith(
+        {
+          order_number: 10001,
+          name: '#10001',
+          financial_status: 'paid',
+          fulfillment_status: 'fulfilled',
+          fulfillments: [
+            {
+              status: 'success',
+              created_at: '2020-10-07T08:39:24Z',
+              tracking_company: 'Giao Hàng Nhanh',
+              tracking_number: '000000',
+              carrier_status_code: code,
+              carrier_status_name: name,
+            },
+          ],
+        },
+        ['order_number', 'fulfillment_status'],
+      );
+
+      expect(result.fulfillment_status_raw).toBe(stage);
+      expect(result.fulfillment_status).toBe(name);
+    },
+  );
+
   it('keeps rebuy_items even when the merchant hides the product list', async () => {
     const result = await lookupWith(
       {
