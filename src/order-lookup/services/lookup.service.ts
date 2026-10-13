@@ -601,17 +601,17 @@ export class LookupService {
     const trackingInfoFromShippingLines =
       shippingLines
         ?.map((line) => ({
-          tracking_number: str(line.code),
-          tracking_url: str(line.url),
-          carrier: str(line.title) || str(line.name),
+          tracking_number: undefined,
+          tracking_url: undefined,
+          carrier: str(line.title) || str(line.name) || str(line.code),
           status: undefined,
           created_at: undefined,
         }))
-        .filter((row) => row.tracking_number || row.carrier) || [];
+        .filter((row) => row.carrier) || [];
     const trackingInfo = trackingInfoFromFulfillments.length
       ? trackingInfoFromFulfillments
       : trackingInfoFromShippingLines;
-    const hasTrackingInfo = trackingInfo.length > 0;
+    const hasFulfillmentTracking = trackingInfoFromFulfillments.length > 0;
 
     // ─── Discounts ───
     const discountCodes = order.discount_codes as
@@ -656,7 +656,7 @@ export class LookupService {
                 'intransit',
                 'out_for_delivery',
                 'outfordelivery',
-              ].includes(rawFulfillmentStatus) || hasTrackingInfo
+              ].includes(rawFulfillmentStatus) || hasFulfillmentTracking
             ? 'shipping'
             : 'notfulfilled';
 

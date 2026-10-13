@@ -310,6 +310,31 @@ describe('LookupService order normalization', () => {
     expect(result.tracking).toHaveLength(1);
   });
 
+  it('keeps an unfulfilled order with only a shipping method as not shipped', async () => {
+    const result = await lookupWith(
+      {
+        order_number: 10001,
+        name: '#10001',
+        financial_status: 'pending',
+        fulfillment_status: 'notfulfilled',
+        fulfillments: [],
+        shipping_lines: [
+          { code: 'Giao hàng tận nơi', title: 'Giao hàng tận nơi', price: 0 },
+        ],
+      },
+      ['order_number', 'fulfillment_status', 'tracking_info'],
+    );
+
+    expect(result.fulfillment_status_raw).toBe('notfulfilled');
+    expect(result.fulfillment_status).toBe('Chưa giao hàng');
+    expect(result.tracking).toEqual([
+      expect.objectContaining({
+        carrier: 'Giao hàng tận nơi',
+        tracking_number: undefined,
+      }),
+    ]);
+  });
+
   it('keeps rebuy_items even when the merchant hides the product list', async () => {
     const result = await lookupWith(
       {
