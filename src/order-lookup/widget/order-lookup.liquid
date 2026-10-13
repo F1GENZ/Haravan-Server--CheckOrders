@@ -767,6 +767,11 @@
 
     // All orders + pagination
     var allOrders = [];
+    var previewOrders = null;
+    function limitPreviewOrders(orders) {
+      var max = Number((window.__f1gConfig || {}).max_orders) || 0;
+      return max > 0 ? orders.slice(0, max) : orders;
+    }
     var perPage = 3;
     var curPage = 1;
 
@@ -966,6 +971,7 @@
 
       applyRequiredMarkers();
 
+      if (previewOrders) allOrders = limitPreviewOrders(previewOrders);
       if (allOrders.length > 0) renderPage();
     }
 
@@ -1247,7 +1253,9 @@
             renderPage();
           } else if (d.require_captcha || d.error === 'captcha_required') {
             renderCaptcha(d.message);
-          } else showErr(d.message || T.err_not_found);
+          } else if (d.error === 'not_found') showErr(T.err_not_found);
+          else if (d.error === 'rate_limited') showErr(T.err_rate_limit);
+          else showErr(d.message || T.err_not_found);
         })
         .catch(function (e) {
           if (e === 'rate_limit' || e === 'auth' || e === 'server') return;
@@ -1271,7 +1279,8 @@
     window.addEventListener('message', function (e) {
       if (!allowPreviewMessage(e)) return;
       if (e.data && e.data.type === 'f1g_preview_orders') {
-        allOrders = e.data.orders || [];
+        previewOrders = e.data.orders || [];
+        allOrders = limitPreviewOrders(previewOrders);
         curPage = 1;
         renderPage();
       }
