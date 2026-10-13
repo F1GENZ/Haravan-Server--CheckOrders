@@ -339,6 +339,8 @@ describe('LookupService order normalization', () => {
     ['readytopick', 'Chờ lấy hàng', 'confirmed'],
     ['delivering', 'Đang giao hàng', 'shipping'],
     ['delivered', 'Đã giao hàng', 'fulfilled'],
+    ['cancel', 'Hủy giao hàng', 'confirmed'],
+    ['return', 'Đang hoàn hàng', 'shipping'],
   ])(
     'follows the carrier status %s instead of the order-level fulfilled flag',
     async (code, name, stage) => {
@@ -366,6 +368,32 @@ describe('LookupService order normalization', () => {
       expect(result.fulfillment_status).toBe(name);
     },
   );
+
+  it('never shows a cancelled order as delivered even when its fulfillment succeeded', async () => {
+    const result = await lookupWith(
+      {
+        order_number: 10001,
+        name: '#10001',
+        financial_status: 'paid',
+        fulfillment_status: 'fulfilled',
+        cancelled_at: '2020-10-08T08:39:24Z',
+        fulfillments: [
+          {
+            status: 'success',
+            created_at: '2020-10-07T08:39:24Z',
+            tracking_company: 'Giao Hàng Nhanh',
+            tracking_number: '000000',
+            carrier_status_code: 'delivered',
+            carrier_status_name: 'Đã giao hàng',
+          },
+        ],
+      },
+      ['order_number', 'fulfillment_status'],
+    );
+
+    expect(result.fulfillment_status_raw).toBe('cancelled');
+    expect(result.fulfillment_status).toBe('Đã hủy giao hàng');
+  });
 
   it('shows the buyer name the Haravan admin shows (billing name)', async () => {
     const result = await lookupWith(
