@@ -1479,7 +1479,7 @@
             if (hasDetail) {
               var addedList = Array.isArray(data.added) ? data.added : [];
               var failedList = Array.isArray(data.failed) ? data.failed : [];
-              if (addedList.length) resolve({ added: addedList, failed: failedList });
+              if (addedList.length || failedList.length) resolve({ added: addedList, failed: failedList });
               else reject(new Error(data.message || 'add_to_cart_failed'));
             } else if (data.success === true) resolve(null);
             else reject(new Error(data.message || 'add_to_cart_failed'));
