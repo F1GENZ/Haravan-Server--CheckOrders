@@ -146,4 +146,13 @@ describe('StoreService.isEntitled', () => {
       ),
     ).toBe(true);
   });
+
+  it('rejects stores whose app was uninstalled even if expiry is in the future', () => {
+    expect(
+      service.isEntitled(
+        { status: 'uninstalled', plan: 'Trial', expires_at: '2027-01-01T00:00:00Z' },
+        now,
+      ),
+    ).toBe(false);
+  });
 });

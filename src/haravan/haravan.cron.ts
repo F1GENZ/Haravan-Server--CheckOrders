@@ -234,6 +234,7 @@ export class HaravanCronService {
     return [
       'unactive',
       'needs_reinstall',
+      'uninstalled',
       'canceled',
       'expired',
       'declined',

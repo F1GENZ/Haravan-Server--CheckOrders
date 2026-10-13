@@ -185,6 +185,7 @@ export class StoreService {
     if (
       [
         'needs_reinstall',
+        'uninstalled',
         'unactive',
         'canceled',
         'cancelled',

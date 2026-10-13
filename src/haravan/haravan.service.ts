@@ -758,6 +758,7 @@ export class HaravanService {
     const status = String(data.status || '').toLowerCase();
     return [
       'needs_reinstall',
+      'uninstalled',
       'unactive',
       'canceled',
       'expired',
