@@ -79,6 +79,7 @@ export class MaskingService {
     if (order.order_number) filtered.order_number = order.order_number;
     if (order.status_text) filtered.status_text = order.status_text;
     if (order.status_class) filtered.status_class = order.status_class;
+    if (order.confirmed) filtered.confirmed = true;
     if (visibleFields.includes('status') && order.financial_status) {
       filtered.financial_status = order.financial_status;
     }
@@ -86,6 +87,7 @@ export class MaskingService {
       if (order.subtotal_price) filtered.subtotal_price = order.subtotal_price;
       if (order.total_discounts)
         filtered.total_discounts = order.total_discounts;
+      if (order.total_shipping) filtered.total_shipping = order.total_shipping;
       if (order.gateway) filtered.gateway = order.gateway;
     }
     if (visibleFields.includes('fulfillment_status')) {

@@ -688,6 +688,9 @@ export class LookupService {
         fulfillmentMap[normalizedFulfillmentStatus] ||
         'Chưa giao hàng',
       fulfillment_status_raw: normalizedFulfillmentStatus,
+      confirmed:
+        (str(order.confirmed_status) || '').toLowerCase() === 'confirmed' ||
+        Boolean(order.confirmed_at),
 
       // Dates
       created_at: fmtDate(order.created_at),
@@ -702,7 +705,17 @@ export class LookupService {
         ? fmtPrice(order.total_discounts)
         : undefined,
       total_tax: Number(order.total_tax) ? fmtPrice(order.total_tax) : undefined,
-      total_shipping: fmtPrice(order.total_shipping_price),
+      total_shipping: (() => {
+        const direct = Number(order.total_shipping_price);
+        const fee =
+          Number.isFinite(direct) && direct > 0
+            ? direct
+            : (shippingLines || []).reduce(
+                (sum, line) => sum + (Number(line.price) || 0),
+                0,
+              );
+        return fee > 0 ? fmtPrice(fee) : undefined;
+      })(),
       currency: str(order.currency),
 
       // Payment

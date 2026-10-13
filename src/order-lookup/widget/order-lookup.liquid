@@ -805,6 +805,7 @@
         lbl_total: 'Tổng cộng',
         lbl_subtotal: 'Tạm tính',
         lbl_discount: 'Giảm giá',
+        lbl_shipping_fee: 'Phí vận chuyển',
         lbl_payment: 'Thanh toán',
         lbl_tracking: 'Vận chuyển',
         lbl_note: 'Ghi chú',
@@ -858,6 +859,7 @@
         lbl_total: 'Total',
         lbl_subtotal: 'Subtotal',
         lbl_discount: 'Discount',
+        lbl_shipping_fee: 'Shipping fee',
         lbl_payment: 'Payment',
         lbl_tracking: 'Shipping',
         lbl_note: 'Note',
@@ -1738,6 +1740,7 @@
         if (has('total_price') && o.subtotal_price) h += iCell(T.lbl_subtotal, o.subtotal_price);
         if (has('total_price') && o.total_discounts && o.total_discounts !== '0₫')
           h += iCell(T.lbl_discount, '-' + o.total_discounts);
+        if (has('total_price') && o.total_shipping) h += iCell(T.lbl_shipping_fee, o.total_shipping);
         if (has('total_price') && o.gateway) h += iCell(T.lbl_payment, o.gateway);
         h += '</div>';
       }
@@ -1849,7 +1852,7 @@
         activeIdx = 3;
       } else if (['partial', 'partiallyfulfilled', 'shipping', 'shipped', 'intransit', 'out_for_delivery', 'outfordelivery'].indexOf(fs.replace(/[_\s-]/g, '')) >= 0) {
         activeIdx = 2;
-      } else if (ps === 'success' || fs === 'confirmed' || fs === 'paid') {
+      } else if (ps === 'success' || o.confirmed === true || fs === 'confirmed' || fs === 'paid') {
         activeIdx = 1;
       } else {
         activeIdx = 0;

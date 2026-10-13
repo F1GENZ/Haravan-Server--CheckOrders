@@ -411,6 +411,63 @@ describe('LookupService order normalization', () => {
     expect(result.customer_name).toBe('Tài Hàng');
   });
 
+  it('shows the shipping fee from shipping lines so the totals add up like the admin', async () => {
+    const result = await lookupWith(
+      {
+        order_number: 10001,
+        name: '#10001',
+        financial_status: 'paid',
+        total_price: 850000,
+        subtotal_price: 870000,
+        total_discounts: 50000,
+        total_shipping_price: null,
+        shipping_lines: [{ title: 'Giao hàng tận nơi', price: 30000 }],
+      },
+      ['order_number', 'total_price'],
+    );
+
+    expect(result.total_shipping).toBe('30.000₫');
+  });
+
+  it('omits the shipping fee when the order ships for free', async () => {
+    const result = await lookupWith(
+      {
+        order_number: 10001,
+        name: '#10001',
+        financial_status: 'paid',
+        total_price: 200000,
+        shipping_lines: [{ title: 'Miễn phí', price: 0 }],
+      },
+      ['order_number', 'total_price'],
+    );
+
+    expect(result.total_shipping).toBeUndefined();
+  });
+
+  it('flags orders the merchant confirmed even when payment is still pending', async () => {
+    const confirmed = await lookupWith(
+      {
+        order_number: 10001,
+        name: '#10001',
+        financial_status: 'pending',
+        confirmed_status: 'confirmed',
+      },
+      ['order_number', 'status'],
+    );
+    const unconfirmed = await lookupWith(
+      {
+        order_number: 10002,
+        name: '#10002',
+        financial_status: 'pending',
+        confirmed_status: 'unconfirmed',
+      },
+      ['order_number', 'status'],
+    );
+
+    expect(confirmed.confirmed).toBe(true);
+    expect(unconfirmed.confirmed).toBeUndefined();
+  });
+
   it('keeps rebuy_items even when the merchant hides the product list', async () => {
     const result = await lookupWith(
       {
