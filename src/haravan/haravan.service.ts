@@ -1432,9 +1432,7 @@ export class HaravanService {
         ? subscriptionSnapshot?.expires_at ||
           existingApp?.expires_at ||
           Date.now() + DEFAULT_PRO_EXPIRES_MS
-        : existingNeedsInstall || !existingApp?.expires_at
-          ? Date.now() + DEFAULT_TRIAL_MS
-          : existingApp.expires_at;
+        : existingApp?.expires_at || Date.now() + DEFAULT_TRIAL_MS;
       const resolvedQuotaTotal = hasActiveSubscription
         ? existingApp?.quota_total || this.proQuota()
         : existingApp?.quota_total || DEFAULT_TRIAL_QUOTA;

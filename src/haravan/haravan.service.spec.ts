@@ -181,16 +181,17 @@ describe('HaravanService OAuth security', () => {
       deleteOrder: jest.fn().mockResolvedValue(undefined),
       purgeOrg: jest.fn().mockResolvedValue(undefined),
     };
+    const haravanApi = { getShop: jest.fn().mockResolvedValue({}) };
     const service = new HaravanService(
       makeConfig(),
       redis as never,
-      { getShop: jest.fn() } as never,
+      haravanApi as never,
       storeService as never,
       notificationService as never,
       db as never,
       orderIndexService as never,
     );
-    return { service, redis, storeService, db, notificationService, orderIndexService };
+    return { service, redis, storeService, db, notificationService, orderIndexService, haravanApi };
   };
   const tokenClaims = (nonce: string, overrides = {}) => {
     const now = Math.floor(Date.now() / 1000);
@@ -447,6 +448,41 @@ describe('HaravanService OAuth security', () => {
     expect(mockedAxios.post.mock.calls).toHaveLength(0);
   });
 
+
+  it('keeps the original trial expiry when an uninstalled shop reinstalls', async () => {
+    const { service, redis, storeService } = createService();
+    const usedTrialExpiry = Date.parse('2026-06-04T00:00:00Z');
+    redis.set('haravan:checkorders:app_install:org_1', {
+      orgid: 'org_1',
+      status: 'uninstalled',
+      plan: 'Trial',
+      expires_at: usedTrialExpiry,
+      installed_at: Date.parse('2026-05-28T00:00:00Z'),
+    });
+
+    const installUrl = new URL((await service.loginApp('org_1')).url);
+    const state = installUrl.searchParams.get('state') || '';
+    const nonce = installUrl.searchParams.get('nonce') || '';
+    mockedAxios.post.mockResolvedValue({
+      data: {
+        id_token: signIdToken(privateKey, kid, tokenClaims(nonce)),
+        access_token: 'new-access-token',
+        refresh_token: 'new-refresh-token',
+        expires_in: 3600,
+      },
+    });
+
+    await service.installApp('oauth-code', state, createResponse() as Response);
+
+    const saved = redis.get<{ expires_at?: number; status?: string }>(
+      'haravan:checkorders:app_install:org_1',
+    );
+    expect(saved?.expires_at).toBe(usedTrialExpiry);
+    expect(saved?.status).toBe('trial');
+    expect(storeService.registerStore.mock.calls[0][5]).toEqual(
+      expect.objectContaining({ expiresAt: usedTrialExpiry }),
+    );
+  });
   it('handles app uninstall webhook without deleting reinstall data', async () => {
     const { service, redis, storeService, db, orderIndexService } = createService();
     const body = {
