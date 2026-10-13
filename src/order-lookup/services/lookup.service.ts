@@ -492,22 +492,15 @@ export class LookupService {
       | Record<string, unknown>
       | undefined;
 
+    const joinName = (addr: Record<string, unknown> | undefined) =>
+      [str(addr?.last_name), str(addr?.first_name)].filter(Boolean).join(' ');
     const customerName =
-      [
-        str(customer?.last_name) || str(shipping?.last_name),
-        str(customer?.first_name) || str(shipping?.first_name),
-      ]
-        .filter(Boolean)
-        .join(' ') ||
-      str(customer?.name) ||
-      [str(shipping?.last_name), str(shipping?.first_name)]
-        .filter(Boolean)
-        .join(' ') ||
-      str(shipping?.name) ||
-      [str(billing?.last_name), str(billing?.first_name)]
-        .filter(Boolean)
-        .join(' ') ||
       str(billing?.name) ||
+      joinName(billing) ||
+      str(shipping?.name) ||
+      joinName(shipping) ||
+      joinName(customer) ||
+      str(customer?.name) ||
       undefined;
 
     // ─── Addresses ───

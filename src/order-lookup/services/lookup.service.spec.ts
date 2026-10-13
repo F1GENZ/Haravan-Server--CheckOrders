@@ -367,6 +367,22 @@ describe('LookupService order normalization', () => {
     },
   );
 
+  it('shows the buyer name the Haravan admin shows (billing name)', async () => {
+    const result = await lookupWith(
+      {
+        order_number: 10001,
+        name: '#10001',
+        financial_status: 'paid',
+        customer: { last_name: 'Q', first_name: 'Hang' },
+        billing_address: { name: 'Tài Hàng', last_name: 'Tài', first_name: 'Hàng' },
+        shipping_address: { name: 'Tài Hàng' },
+      },
+      ['order_number', 'customer_name'],
+    );
+
+    expect(result.customer_name).toBe('Tài Hàng');
+  });
+
   it('keeps rebuy_items even when the merchant hides the product list', async () => {
     const result = await lookupWith(
       {
