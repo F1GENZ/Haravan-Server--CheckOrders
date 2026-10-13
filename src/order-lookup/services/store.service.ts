@@ -1,5 +1,5 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
-import { isPremiumOrg } from '../utils/premium-orgs.util';
+import { isPremiumOrg, PREMIUM_EXPIRES_MS } from '../utils/premium-orgs.util';
 import { RedisService } from '../../redis/redis.service';
 import { PrismaService } from '../../database/prisma.service';
 import type {
@@ -327,11 +327,21 @@ export class StoreService {
     return store;
   }
 
+  private applyPremiumOverride(store: StoreRecord | null): StoreRecord | null {
+    if (!store || !isPremiumOrg(store.org_id)) return store;
+    return {
+      ...store,
+      status: 'active',
+      plan: 'Pro',
+      expires_at: new Date(Date.now() + PREMIUM_EXPIRES_MS).toISOString(),
+    };
+  }
+
   async getStoreByOrgId(orgId: string): Promise<StoreRecord | null> {
     const cached = await this.redis.get<StoreRecord>(
       `${STORE_PREFIX}:${orgId}`,
     );
-    if (cached) return cached;
+    if (cached) return this.applyPremiumOverride(cached);
 
     const stored = await this.db?.findShopByOrgId(orgId);
     if (stored) {
@@ -351,7 +361,7 @@ export class StoreService {
           ),
       );
     }
-    return stored || null;
+    return this.applyPremiumOverride(stored || null);
   }
 
   async getStoreByDomain(domain: string): Promise<StoreRecord | null> {
@@ -369,7 +379,7 @@ export class StoreService {
       );
       await this.redis.set(`${STORE_PREFIX}:${stored.org_id}`, stored);
     }
-    return stored || null;
+    return this.applyPremiumOverride(stored || null);
   }
 
   async getStoreByPublicShop(shop: string): Promise<StoreRecord | null> {

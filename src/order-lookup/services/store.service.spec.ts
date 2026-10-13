@@ -185,4 +185,38 @@ describe('StoreService.isEntitled', () => {
       delete process.env.PREMIUM_ORGIDS;
     }
   });
+
+  it('returns Pro with a long expiry from store getters for PREMIUM_ORGIDS', async () => {
+    process.env.PREMIUM_ORGIDS = 'org-p';
+    try {
+      const redis = new RedisMock();
+      const svc = new StoreService(redis as never);
+      const base = {
+        shop_domain: 'p.myharavan.com',
+        access_token: 'x',
+        is_active: true,
+        installed_at: '2026-05-28T00:00:00.000Z',
+        status: 'trial',
+        plan: 'Trial',
+        expires_at: '2026-06-04T00:00:00.000Z',
+      };
+      await redis.set('haravan:checkorders:store:org-p', { ...base, org_id: 'org-p' });
+      await redis.set('haravan:checkorders:store:org-n', { ...base, org_id: 'org-n' });
+      await redis.set('haravan:checkorders:domain:p.myharavan.com', 'org-p');
+
+      const premium = await svc.getStoreByOrgId('org-p');
+      expect(premium?.plan).toBe('Pro');
+      expect(premium?.status).toBe('active');
+      expect(Date.parse(premium?.expires_at || '')).toBeGreaterThan(
+        Date.now() + 5 * 365 * 24 * 60 * 60 * 1000,
+      );
+      expect((await svc.getStoreByPublicShop('p'))?.plan).toBe('Pro');
+
+      const normal = await svc.getStoreByOrgId('org-n');
+      expect(normal?.plan).toBe('Trial');
+      expect(normal?.expires_at).toBe('2026-06-04T00:00:00.000Z');
+    } finally {
+      delete process.env.PREMIUM_ORGIDS;
+    }
+  });
 });
