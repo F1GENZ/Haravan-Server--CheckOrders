@@ -198,6 +198,53 @@ describe('LookupService subscription gating', () => {
   });
 });
 
+describe('LookupService captcha escalation', () => {
+  const lookupOverHourlyLimit = async () => {
+    const ctx = createService();
+    ctx.rateLimitService.check.mockResolvedValueOnce({
+      blocked: false,
+      require_captcha: true,
+    });
+    const response = await ctx.service.lookup(
+      'shop',
+      '0901234567',
+      '#10001',
+      '203.0.113.10',
+      'https://checkorders.example.com',
+      'https://shop.myharavan.com',
+      undefined,
+      'checkorders.example.com',
+    );
+    return { ...ctx, response };
+  };
+
+  afterEach(() => {
+    delete process.env.TURNSTILE_SITE_KEY;
+    delete process.env.TURNSTILE_SECRET_KEY;
+  });
+
+  it('does not lock shoppers out when Turnstile is not configured', async () => {
+    const { response, haravanOrderService } = await lookupOverHourlyLimit();
+
+    expect(response.success).toBe(true);
+    expect(haravanOrderService.lookupOrders.mock.calls).toHaveLength(1);
+  });
+
+  it('demands a captcha token when Turnstile is configured', async () => {
+    process.env.TURNSTILE_SITE_KEY = 'site-key';
+    process.env.TURNSTILE_SECRET_KEY = 'secret-key';
+
+    const { response, haravanOrderService } = await lookupOverHourlyLimit();
+
+    expect(response).toMatchObject({
+      success: false,
+      error: 'captcha_required',
+      require_captcha: true,
+    });
+    expect(haravanOrderService.lookupOrders.mock.calls).toHaveLength(0);
+  });
+});
+
 describe('LookupService order normalization', () => {
   const lookupWith = async (
     order: Record<string, unknown>,

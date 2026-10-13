@@ -46,16 +46,21 @@ export class RedisService implements OnModuleDestroy {
   }
 
   /**
-   * Atomic increment with TTL (for rate limiting).
-   * Uses Redis INCR + EXPIRE pipeline — no race conditions.
+   * Atomic fixed-window counter: the TTL is set only when the window opens,
+   * so repeated hits cannot keep extending a lockout.
    */
   async incr(key: string, ttlSeconds: number): Promise<number> {
-    const pipeline = this.client.pipeline();
-    pipeline.incr(key);
-    pipeline.expire(key, ttlSeconds);
-    const results = await pipeline.exec();
-    if (!results || !results[0]) return 1;
-    return results[0][1] as number;
+    const results = await this.client
+      .pipeline()
+      .set(key, '0', 'EX', ttlSeconds, 'NX')
+      .incr(key)
+      .ttl(key)
+      .exec();
+    const count = Number(results?.[1]?.[1]) || 1;
+    if (Number(results?.[2]?.[1]) === -1) {
+      await this.client.expire(key, ttlSeconds);
+    }
+    return count;
   }
 
   /**

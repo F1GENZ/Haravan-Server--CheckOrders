@@ -181,7 +181,7 @@ export class LookupService {
       };
     }
 
-    if (rateResult.require_captcha) {
+    if (rateResult.require_captcha && this.isCaptchaConfigured()) {
       const captchaValid = await this.verifyCaptcha(captchaToken, clientIp);
       if (!captchaValid) {
         await this.logLookup(
@@ -389,6 +389,13 @@ export class LookupService {
       .map((value) => this.getHostname(value || ''))
       .filter((value): value is string => Boolean(value));
     return new Set(hosts);
+  }
+
+  private isCaptchaConfigured(): boolean {
+    return Boolean(
+      String(process.env.TURNSTILE_SITE_KEY || '').trim() &&
+        String(process.env.TURNSTILE_SECRET_KEY || '').trim(),
+    );
   }
 
   private async verifyCaptcha(
