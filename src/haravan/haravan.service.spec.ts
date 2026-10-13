@@ -448,6 +448,28 @@ describe('HaravanService OAuth security', () => {
     expect(mockedAxios.post.mock.calls).toHaveLength(0);
   });
 
+  it('does not push a PREMIUM_ORGIDS shop through reinstall after uninstall', async () => {
+    process.env.PREMIUM_ORGIDS = 'org_1';
+    try {
+      const { service, redis } = createService();
+      redis.set('haravan:checkorders:app_install:org_1', {
+        orgid: 'org_1',
+        status: 'uninstalled',
+        plan: 'Trial',
+        expires_at: Date.parse('2026-06-04T00:00:00Z'),
+      });
+
+      const launchUrl = new URL((await service.loginApp('org_1')).url);
+      expect(launchUrl.searchParams.get('redirect_uri')).not.toContain(
+        'grandservice',
+      );
+      expect(launchUrl.searchParams.get('redirect_uri')).toContain(
+        '/install/login',
+      );
+    } finally {
+      delete process.env.PREMIUM_ORGIDS;
+    }
+  });
 
   it('keeps the original trial expiry when an uninstalled shop reinstalls', async () => {
     const { service, redis, storeService } = createService();

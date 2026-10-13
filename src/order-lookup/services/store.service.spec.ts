@@ -155,4 +155,34 @@ describe('StoreService.isEntitled', () => {
       ),
     ).toBe(false);
   });
+
+  it('always entitles orgids listed in PREMIUM_ORGIDS, even when expired or uninstalled', () => {
+    process.env.PREMIUM_ORGIDS = ' 111 , 1000405253 ';
+    try {
+      expect(
+        service.isEntitled(
+          {
+            org_id: '1000405253',
+            status: 'uninstalled',
+            plan: 'Trial',
+            expires_at: '2026-06-04T00:00:00Z',
+          },
+          now,
+        ),
+      ).toBe(true);
+      expect(
+        service.isEntitled(
+          {
+            org_id: '1000405254',
+            status: 'trial',
+            plan: 'Trial',
+            expires_at: '2026-06-04T00:00:00Z',
+          },
+          now,
+        ),
+      ).toBe(false);
+    } finally {
+      delete process.env.PREMIUM_ORGIDS;
+    }
+  });
 });

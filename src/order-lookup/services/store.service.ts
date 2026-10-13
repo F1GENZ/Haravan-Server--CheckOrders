@@ -1,4 +1,5 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
+import { isPremiumOrg } from '../utils/premium-orgs.util';
 import { RedisService } from '../../redis/redis.service';
 import { PrismaService } from '../../database/prisma.service';
 import type {
@@ -178,9 +179,12 @@ export class StoreService {
   }
 
   isEntitled(
-    store: Pick<StoreRecord, 'status' | 'plan' | 'expires_at'>,
+    store: Pick<StoreRecord, 'status' | 'plan' | 'expires_at'> & {
+      org_id?: string;
+    },
     now = Date.now(),
   ): boolean {
+    if (isPremiumOrg(store.org_id)) return true;
     const status = String(store.status || 'trial').toLowerCase();
     if (
       [

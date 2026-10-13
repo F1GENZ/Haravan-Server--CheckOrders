@@ -14,6 +14,10 @@ import { StoreService } from '../order-lookup/services/store.service';
 import { NotificationService } from '../notification/notification.service';
 import { PrismaService } from '../database/prisma.service';
 import { OrderIndexService } from '../order-lookup/services/order-index.service';
+import {
+  isPremiumOrg,
+  PREMIUM_EXPIRES_MS,
+} from '../order-lookup/utils/premium-orgs.util';
 import axios from 'axios';
 import * as crypto from 'crypto';
 import type { Request, Response } from 'express';
@@ -713,13 +717,28 @@ export class HaravanService {
     return null;
   }
 
+  private applyPremiumOverride(
+    orgid: string,
+    data: RedisInstallData | null | undefined,
+  ): RedisInstallData | null {
+    if (!data) return null;
+    if (!isPremiumOrg(orgid)) return data;
+    return {
+      ...data,
+      status: 'active',
+      plan: 'Pro',
+      subscription_status: 'active',
+      expires_at: Date.now() + PREMIUM_EXPIRES_MS,
+    };
+  }
+
   private async getInstallSession(
     orgid: string,
   ): Promise<RedisInstallData | null> {
     const cached = await this.redisService.get<RedisInstallData>(
       this.sessionKey(orgid),
     );
-    if (cached) return cached;
+    if (cached) return this.applyPremiumOverride(orgid, cached);
 
     const stored = (await this.db?.findInstallSession(orgid)) as
       | RedisInstallData
@@ -732,7 +751,7 @@ export class HaravanService {
         this.getInstallTtlSeconds(stored),
       );
     }
-    return stored || null;
+    return this.applyPremiumOverride(orgid, stored);
   }
 
   private isProApp(data: RedisInstallData | null | undefined): boolean {
