@@ -103,11 +103,11 @@ export class HaravanOrderService {
       this.orderIndexService &&
       (await this.orderIndexService.isReady(storeId))
     ) {
-      const cacheKey = this.buildCacheKey(
+      const cacheKey = `${this.buildCacheKey(
         storeId,
         normalizedPhone,
         normalizedCode,
-      );
+      )}:max${maxOrders}`;
       const cached = await this.redis.get<CachedLookup>(cacheKey);
       if (!Array.isArray(cached) && Array.isArray(cached?.orders)) {
         await this.saveTelemetry(storeId, {

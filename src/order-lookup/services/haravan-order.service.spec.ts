@@ -327,6 +327,28 @@ describe('HaravanOrderService DB order index integration', () => {
     );
   });
 
+  it('returns more orders as soon as the merchant raises max_orders', async () => {
+    const all = [1, 2, 3, 4].map((id) => ({ id, name: `#${id}` }));
+    const { service, orderIndexServiceMock } = createIndexedService([]);
+    orderIndexServiceMock.search.mockImplementation(
+      (_store: string, _phone: string, _code: string, limit: number) =>
+        Promise.resolve(all.slice(0, limit)),
+    );
+    const byIds = (url: string) => {
+      const ids = (new URL(url).searchParams.get('ids') || '').split(',');
+      return Promise.resolve({
+        data: { orders: all.filter((o) => ids.includes(String(o.id))) },
+      });
+    };
+    mockedAxios.get.mockImplementationOnce(byIds).mockImplementationOnce(byIds);
+
+    const first = await service.lookupOrders('token', 'store_ready', '0901234567', '', 1);
+    const second = await service.lookupOrders('token', 'store_ready', '0901234567', '', 3);
+
+    expect(first).toHaveLength(1);
+    expect(second.map((o) => o.id)).toEqual([1, 2, 3]);
+  });
+
   it('drops indexed orders that no longer exist on Haravan', async () => {
     const { service } = createIndexedService([
       { id: 1, name: '#1' },
