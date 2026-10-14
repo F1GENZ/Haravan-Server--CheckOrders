@@ -11,24 +11,53 @@ import type { StoreSettings } from './store.service';
 export class MaskingService {
   maskPhone(phone: string | undefined | null): string {
     if (!phone) return '';
-    const cleaned = phone.replace(/\D/g, '');
+    const raw = String(phone).trim();
+    if (raw.includes('***')) return raw;
+    const cleaned = raw.replace(/\D/g, '');
     if (cleaned.length < 6) return '***';
     return cleaned.slice(0, 3) + '***' + cleaned.slice(-4);
   }
 
   maskEmail(email: string | undefined | null): string {
     if (!email) return '';
-    const atIndex = email.indexOf('@');
-    if (atIndex < 2) return '***@' + email.slice(atIndex + 1);
-    return email[0] + '***' + email.slice(atIndex);
+    const raw = String(email).trim();
+    if (raw.includes('***')) return raw;
+    const atIndex = raw.indexOf('@');
+    if (atIndex < 0) return '***';
+    if (atIndex < 2) return '***@' + raw.slice(atIndex + 1);
+    return raw[0] + '***' + raw.slice(atIndex);
   }
 
   maskAddress(address: string | undefined | null): string {
     if (!address) return '';
-    // Keep only the last part (city/province)
-    const parts = address.split(',').map((s) => s.trim());
+    const raw = String(address).trim();
+    if (raw.includes('***')) return raw;
+    const parts = raw
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    while (
+      parts.length > 1 &&
+      /^(viet\s*nam|việt\s*nam|vn)$/i.test(parts[parts.length - 1])
+    ) {
+      parts.pop();
+    }
     if (parts.length <= 1) return '***';
-    return '***' + parts.slice(-1).join(', ');
+    return '***' + parts[parts.length - 1];
+  }
+
+  maskName(name: string | undefined | null): string {
+    if (!name) return '';
+    const raw = String(name).trim();
+    if (!raw || raw.includes('***')) return raw;
+    const words = raw.split(/\s+/).filter(Boolean);
+    if (words.length >= 3) {
+      return `${words[0]} *** ${words[words.length - 1]}`;
+    }
+    if (words.length === 2) {
+      return `${words[0]} ${words[1][0] || ''}***`;
+    }
+    return `${raw[0] || ''}***`;
   }
 
   /**
@@ -37,21 +66,30 @@ export class MaskingService {
   applyMasking(
     order: Record<string, unknown>,
     settings: StoreSettings,
+    context?: { lookedUpWithoutPhone?: boolean },
   ): Record<string, unknown> {
     const result = { ...order };
+    const forceMaskForCodeOnly = Boolean(context?.lookedUpWithoutPhone);
 
-    if (settings.mask_phone && result.phone) {
+    if ((settings.mask_phone || forceMaskForCodeOnly) && result.phone) {
       result.phone = this.maskPhone(result.phone as string);
     }
 
-    if (settings.mask_email && result.email) {
+    if ((settings.mask_email || forceMaskForCodeOnly) && result.email) {
       result.email = this.maskEmail(result.email as string);
     }
 
-    if (settings.mask_address && result.shipping_address) {
+    if (
+      (settings.mask_address || forceMaskForCodeOnly) &&
+      result.shipping_address
+    ) {
       result.shipping_address = this.maskAddress(
         result.shipping_address as string,
       );
+    }
+
+    if (forceMaskForCodeOnly && result.customer_name) {
+      result.customer_name = this.maskName(result.customer_name as string);
     }
 
     return result;

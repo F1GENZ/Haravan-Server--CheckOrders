@@ -180,6 +180,7 @@ describe('HaravanService OAuth security', () => {
       upsertOrder: jest.fn().mockResolvedValue(undefined),
       deleteOrder: jest.fn().mockResolvedValue(undefined),
       purgeOrg: jest.fn().mockResolvedValue(undefined),
+      ensureBackfill: jest.fn().mockResolvedValue(undefined),
     };
     const haravanApi = {
       getShop: jest.fn().mockResolvedValue({}),
@@ -490,6 +491,20 @@ describe('HaravanService OAuth security', () => {
     );
   });
 
+  it('throws UnauthorizedException when a non-Pro session has an expired access token and no refresh token', async () => {
+    const { service, redis } = createService();
+    redis.set('haravan:checkorders:app_install:org_expired_trial', {
+      orgid: 'org_expired_trial',
+      access_token: 'stale-trial-token',
+      token_expires_at: Date.now() - 60 * 1000,
+      status: 'trial',
+      plan: 'Trial',
+    });
+
+    await expect(
+      service.resolveAccessToken('org_expired_trial'),
+    ).rejects.toThrow('Session expired, please login again');
+  });
   it('rejects install callback without OAuth state', async () => {
     const { service } = createService();
     const res = createResponse();
@@ -797,6 +812,32 @@ describe('HaravanService order webhooks', () => {
       expect.objectContaining({ ok: true }),
     );
     expect(orderIndexService.upsertOrder).not.toHaveBeenCalled();
+  });
+
+  it('invalidates order lookup cache and deduplicates identical webhook deliveries within TTL window', async () => {
+    const { service, redis, orderIndexService } = createService();
+    redis.set('haravan:checkorders:cache:org_test_1:abc:max5', {
+      orders: [{ id: 99999 }],
+    });
+    const payload = {
+      orgid: 'org_test_1',
+      id: 99999,
+      order_number: 9999,
+      name: '#9999',
+      phone: '0901234567',
+    };
+
+    const first = await service.handleWebhook(
+      makeWebhookReq('orders/updated', payload),
+    );
+    const second = await service.handleWebhook(
+      makeWebhookReq('orders/updated', payload),
+    );
+
+    expect(first).toEqual(expect.objectContaining({ ok: true, processed: true }));
+    expect(second).toEqual(expect.objectContaining({ ok: true, duplicate: true }));
+    expect(orderIndexService.upsertOrder).toHaveBeenCalledTimes(1);
+    expect(redis.get('haravan:checkorders:cache:org_test_1:abc:max5')).toBeNull();
   });
 });
 });

@@ -72,11 +72,13 @@ describe('HaravanCronService order sync & webhook resubscription', () => {
       orgid: 'org_shop_1',
       status: 'installed',
       refresh_token: 'refresh_tok_1',
+      token_expires_at: Date.now() + 6 * 60 * 60 * 1000,
     });
     await redisMock.set('haravan:checkorders:app_install:org_shop_2', {
       orgid: 'org_shop_2',
       status: 'installed',
       refresh_token: 'refresh_tok_2',
+      token_expires_at: Date.now() + 6 * 60 * 60 * 1000,
     });
 
     // org_shop_1 is not ready, org_shop_2 is already ready
@@ -98,5 +100,28 @@ describe('HaravanCronService order sync & webhook resubscription', () => {
     haravanServiceMock.subscribeWebhooksForShop.mockClear();
     await cronService.handleOrderSyncCron();
     expect(haravanServiceMock.subscribeWebhooksForShop).not.toHaveBeenCalled();
+  });
+
+  it('skips uninstalled or expired Pro shops in order sync cron', async () => {
+    await redisMock.set('haravan:checkorders:app_install:org_uninstalled', {
+      orgid: 'org_uninstalled',
+      status: 'uninstalled',
+      plan: 'Pro',
+      subscription_status: 'active',
+      refresh_token: 'refresh_tok_u',
+    });
+    await redisMock.set('haravan:checkorders:app_install:org_expired_pro', {
+      orgid: 'org_expired_pro',
+      status: 'active',
+      plan: 'Pro',
+      subscription_status: 'active',
+      expires_at: Date.now() - 60_000,
+      refresh_token: 'refresh_tok_e',
+    });
+
+    await cronService.handleOrderSyncCron();
+
+    expect(haravanServiceMock.subscribeWebhooksForShop).not.toHaveBeenCalled();
+    expect(orderIndexServiceMock.ensureBackfill).not.toHaveBeenCalled();
   });
 });

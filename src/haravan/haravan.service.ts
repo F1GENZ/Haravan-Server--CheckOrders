@@ -757,17 +757,31 @@ export class HaravanService {
   private isProApp(data: RedisInstallData | null | undefined): boolean {
     if (!data) return false;
     const status = String(data.status || '').toLowerCase();
+    if (
+      [
+        'uninstalled',
+        'unactive',
+        'lapsed',
+        'canceled',
+        'cancelled',
+        'expired',
+        'declined',
+      ].includes(status)
+    ) {
+      return false;
+    }
+    const hasValidExpiry =
+      !data.expires_at ||
+      (typeof data.expires_at === 'number' && data.expires_at > Date.now());
+    if (!hasValidExpiry) return false;
     const plan = String(data.plan || '').toLowerCase();
     const subscriptionStatus = String(
       data.subscription_status || '',
     ).toLowerCase();
-    const hasValidExpiry =
-      !data.expires_at ||
-      (typeof data.expires_at === 'number' && data.expires_at > Date.now());
     return (
       plan === 'pro' ||
       subscriptionStatus === 'active' ||
-      (['active', 'accepted', 'approved'].includes(status) && hasValidExpiry)
+      ['active', 'accepted', 'approved'].includes(status)
     );
   }
 
@@ -1517,6 +1531,13 @@ export class HaravanService {
           },
         );
         await this.saveShopOrgIndex(orgid, shopDomains);
+        if (typeof this.orderIndexService?.ensureBackfill === 'function') {
+          void this.orderIndexService.ensureBackfill(orgid).catch((err) => {
+            this.logger.warn(
+              `Initial order backfill trigger failed for orgid=${orgid}: ${getErrorMessage(err)}`,
+            );
+          });
+        }
         this.logger.log(
           `Store registered for order lookup: ${orgid} (${shopDomain})`,
         );
@@ -1659,6 +1680,47 @@ export class HaravanService {
     }
     return challenge;
   }
+  private async invalidateOrderLookupCache(orgid: string): Promise<void> {
+    if (!orgid) return;
+    try {
+      const pattern = `haravan:checkorders:cache:${orgid}:*`;
+      const keys =
+        typeof this.redisService.scanKeys === 'function'
+          ? await this.redisService.scanKeys(pattern)
+          : typeof this.redisService.getKeys === 'function'
+            ? await this.redisService.getKeys(pattern)
+            : [];
+      if (keys.length > 0) {
+        await Promise.all(keys.map((key) => this.redisService.del(key)));
+      }
+    } catch (error) {
+      this.logger.warn(
+        `Failed to invalidate lookup cache for orgid=${orgid}: ${getErrorMessage(error)}`,
+      );
+    }
+  }
+
+  private async isDuplicateWebhookDelivery(
+    topic: string,
+    rawBody: Buffer | undefined,
+    body: unknown,
+  ): Promise<boolean> {
+    try {
+      const payloadBuf =
+        rawBody && rawBody.length > 0
+          ? rawBody
+          : Buffer.from(JSON.stringify(body || {}));
+      const hash = crypto.createHash('sha256').update(payloadBuf).digest('hex');
+      const dedupeKey = `haravan:checkorders:webhook_dedupe:${topic.toLowerCase().trim()}:${hash}`;
+      if (typeof this.redisService.setNx === 'function') {
+        const acquired = await this.redisService.setNx(dedupeKey, '1', 120);
+        return !acquired;
+      }
+      return false;
+    } catch {
+      return false;
+    }
+  }
 
   async handleWebhook(req: RawBodyRequest): Promise<Record<string, unknown>> {
     const topic =
@@ -1671,7 +1733,15 @@ export class HaravanService {
     }
 
     const normalizedTopic = topic.toLowerCase().trim();
-
+    if (
+      await this.isDuplicateWebhookDelivery(
+        normalizedTopic,
+        req.rawBody,
+        req.body,
+      )
+    ) {
+      return { ok: true, duplicate: true, topic };
+    }
     if (
       ['app/uninstalled', 'app_uninstalled', 'app uninstall'].includes(
         normalizedTopic,
@@ -1791,6 +1861,7 @@ export class HaravanService {
           );
         }
       }
+      await this.invalidateOrderLookupCache(orgid);
     }
 
     await this.db?.recordWebhook({
@@ -1835,6 +1906,7 @@ export class HaravanService {
           );
         }
       }
+      await this.invalidateOrderLookupCache(orgid);
     }
 
     await this.db?.recordWebhook({

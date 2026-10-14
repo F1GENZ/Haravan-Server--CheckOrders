@@ -47,7 +47,7 @@
             placeholder='#10000'
             class='f1g-ot__input'
             autocomplete='off'
-            maxlength='20'
+            maxlength='30'
           >
         </div>
 
@@ -184,6 +184,7 @@
     display: grid;
     width: min(980px, calc(100vw - 40px));
     max-height: calc(100vh - 40px);
+    max-height: calc(100dvh - 40px);
     min-height: 560px;
     background: var(--f1g-card);
   }
@@ -1071,6 +1072,12 @@
         if (emptyDesc) emptyDesc.textContent = T.empty_desc;
         errEl.style.display = 'none';
       }
+      if (isFramed()) {
+        try {
+          var pOrigin = getParentOrigin(window.__f1gConfig || {}) || '*';
+          window.parent.postMessage({ type: 'f1g_widget_disabled', disabled: !enabled }, pOrigin);
+        } catch (e) {}
+      }
     }
 
     function postPopupState(open) {
@@ -1091,14 +1098,18 @@
       }
     }
 
+    var modeInitialized = false;
     function applyDisplayMode(mode) {
-      displayMode = mode === 'popup' ? 'popup' : mode === 'trigger' ? 'trigger' : 'inline';
+      var nextMode = mode === 'popup' ? 'popup' : mode === 'trigger' ? 'trigger' : 'inline';
+      var modeChanged = !modeInitialized || nextMode !== displayMode;
+      modeInitialized = true;
+      displayMode = nextMode;
       var isPopup = displayMode === 'popup';
       var isTrigger = displayMode === 'trigger';
       root.classList.toggle('f1g-ot--popup', isPopup);
       root.classList.toggle('f1g-ot--trigger', isTrigger);
       if (isPopup || isTrigger) {
-        setPopupOpen(false);
+        if (modeChanged) setPopupOpen(false);
       } else {
         root.classList.remove('f1g-ot--popup-open');
         postPopupState(false);
@@ -1162,6 +1173,7 @@
 
     function normalizePhone(v) {
       var p = String(v || '').replace(/[\s\-().]/g, '');
+      if (p.indexOf('00') === 0 && p.length > 2) p = '+' + p.slice(2);
       if (p.indexOf('+84') === 0) p = '0' + p.slice(3);
       else if (/^84\d{9,}$/.test(p)) p = '0' + p.slice(2);
       else if (p.charAt(0) === '+') p = p.slice(1);
@@ -1169,6 +1181,8 @@
     }
 
     function getStoreOrigin() {
+      var parentOrigin = getParentOrigin(window.__f1gConfig || {});
+      if (parentOrigin) return parentOrigin;
       try {
         if (document.referrer) return new URL(document.referrer).origin;
       } catch (e) {}
@@ -1225,6 +1239,7 @@
         body.order_code = code;
       }
       body.shop = getPublicShop();
+      var usedCaptchaToken = Boolean(captchaToken);
       if (captchaToken) body.captcha_token = captchaToken;
       fetch(API + '/api/order/lookup', {
         method: 'POST',
@@ -1232,6 +1247,7 @@
         body: JSON.stringify(body),
       })
         .then(function (r) {
+          if (usedCaptchaToken) resetCaptchaToken();
           if (r.status === 429) {
             setLoading(false);
             showErr(T.err_rate_limit);
@@ -1261,10 +1277,19 @@
             renderCaptcha(d.message);
           } else if (d.error === 'not_found') showErr(T.err_not_found);
           else if (d.error === 'rate_limited') showErr(T.err_rate_limit);
+          else if (d.error === 'server_error') showErr(T.err_server);
+          else if (
+            d.error === 'store_error' ||
+            d.error === 'subscription_expired' ||
+            d.error === 'origin_invalid' ||
+            d.error === 'origin_mismatch'
+          )
+            showErr(T.err_auth);
           else showErr(d.message || T.err_not_found);
         })
         .catch(function (e) {
           if (e === 'rate_limit' || e === 'auth' || e === 'server') return;
+          if (usedCaptchaToken) resetCaptchaToken();
           setLoading(false);
           showErr(T.err_network);
         });
@@ -1351,6 +1376,8 @@
     }
 
     function getStoreBaseUrl(cfg) {
+      var parentOrigin = getParentOrigin(cfg);
+      if (parentOrigin) return parentOrigin;
       try {
         if (isFramed() && document.referrer) return new URL(document.referrer).origin;
       } catch (e) {}
@@ -1448,6 +1475,17 @@
     function getParentOrigin(cfg) {
       var allowedOrigins = getAllowedStoreOrigins(cfg);
       try {
+        var paramOrigin = normalizeOrigin(
+          new URLSearchParams(window.location.search).get('parent_origin'),
+        );
+        if (
+          paramOrigin &&
+          (!allowedOrigins.length || allowedOrigins.indexOf(paramOrigin) !== -1)
+        ) {
+          return paramOrigin;
+        }
+      } catch (e) {}
+      try {
         if (document.referrer) {
           var referrerOrigin = new URL(document.referrer).origin.replace(/\/+$/, '');
           if (!allowedOrigins.length || allowedOrigins.indexOf(referrerOrigin) !== -1) {
@@ -1496,9 +1534,10 @@
             if (hasDetail) {
               var addedList = Array.isArray(data.added) ? data.added : [];
               var failedList = Array.isArray(data.failed) ? data.failed : [];
-              if (addedList.length || failedList.length) resolve({ added: addedList, failed: failedList });
+              if (addedList.length || failedList.length)
+                resolve({ added: addedList, failed: failedList, fromParentBridge: true });
               else reject(new Error(data.message || 'add_to_cart_failed'));
-            } else if (data.success === true) resolve(null);
+            } else if (data.success === true) resolve({ added: [], failed: [], fromParentBridge: true });
             else reject(new Error(data.message || 'add_to_cart_failed'));
           }
         }
@@ -1607,6 +1646,7 @@
             .then(function (result) {
               var failedIds = result && Array.isArray(result.failed) ? result.failed : [];
               if (!failedIds.length) {
+                if (result && result.fromParentBridge) return;
                 finishRebuy(base);
                 return;
               }
@@ -1678,20 +1718,40 @@
 
       // Masking helpers
       function maskPhone(p) {
-        if (!p || p.length < 7) return p;
-        return p.slice(0, 4) + '***' + p.slice(-3);
+        if (!p) return '';
+        var s = String(p).trim();
+        if (s.indexOf('***') !== -1) return s;
+        var cleaned = s.replace(/\D/g, '');
+        if (cleaned.length < 6) return '***';
+        return cleaned.slice(0, 3) + '***' + cleaned.slice(-4);
       }
       function maskEmail(e) {
-        if (!e) return e;
-        var at = e.indexOf('@');
-        if (at < 1) return e;
-        return e[0] + '***' + e.slice(at);
+        if (!e) return '';
+        var s = String(e).trim();
+        if (s.indexOf('***') !== -1) return s;
+        var at = s.indexOf('@');
+        if (at < 0) return '***';
+        if (at < 2) return '***@' + s.slice(at + 1);
+        return s[0] + '***' + s.slice(at);
       }
       function maskAddr(a) {
-        if (!a || a.length < 15) return a;
-        var comma = a.indexOf(',');
-        if (comma > 0) return '***' + a.slice(comma);
-        return a.slice(0, 5) + '***';
+        if (!a) return '';
+        var s = String(a).trim();
+        if (s.indexOf('***') !== -1) return s;
+        var parts = s
+          .split(',')
+          .map(function (x) {
+            return x.trim();
+          })
+          .filter(Boolean);
+        while (
+          parts.length > 1 &&
+          /^(viet\s*nam|việt\s*nam|vn)$/i.test(parts[parts.length - 1])
+        ) {
+          parts.pop();
+        }
+        if (parts.length <= 1) return '***';
+        return '***' + parts[parts.length - 1];
       }
       var doMaskPhone = cfg.mask_phone !== false;
       var doMaskEmail = cfg.mask_email !== false;
@@ -1699,17 +1759,20 @@
 
       var h = '<div class="f1g-ot__card" style="animation-delay:' + idx * 80 + 'ms">';
 
-      // Header — always show order_number and status
-      h += '<div class="f1g-ot__card-head">';
-      if (has('order_number')) h += '<span class="f1g-ot__order-num">' + esc(o.order_number) + '</span>';
-      if (has('status'))
-        h +=
-          '<span class="f1g-ot__badge f1g-ot__badge--' +
-          esc(o.status_class || 'pending') +
-          '">' +
-          esc(translateStatus(o.financial_status, o.status_text)) +
-          '</span>';
-      h += '</div><div class="f1g-ot__card-body">';
+      // Header — render only when order_number or status is visible
+      if (has('order_number') || has('status')) {
+        h += '<div class="f1g-ot__card-head">';
+        if (has('order_number')) h += '<span class="f1g-ot__order-num">' + esc(o.order_number) + '</span>';
+        if (has('status'))
+          h +=
+            '<span class="f1g-ot__badge f1g-ot__badge--' +
+            esc(o.status_class || 'pending') +
+            '">' +
+            esc(translateStatus(o.financial_status, o.status_text)) +
+            '</span>';
+        h += '</div>';
+      }
+      h += '<div class="f1g-ot__card-body">';
 
       // Timeline stepper (shown if fulfillment_status visible)
       if (has('fulfillment_status')) h += renderTimeline(o);
@@ -1753,7 +1816,7 @@
         if (has('created_at') && o.created_at) h += iCell(T.lbl_date, o.created_at);
         if (has('total_price') && o.total_price) h += iCellHtml(T.lbl_total, '<strong>' + esc(o.total_price) + '</strong>');
         if (has('total_price') && o.subtotal_price) h += iCell(T.lbl_subtotal, o.subtotal_price);
-        if (has('total_price') && o.total_discounts && o.total_discounts !== '0₫')
+        if (has('total_price') && o.total_discounts && !/^0(\D|$)/.test(String(o.total_discounts).trim()))
           h += iCell(T.lbl_discount, '-' + o.total_discounts);
         if (has('total_price') && o.total_shipping) h += iCell(T.lbl_shipping_fee, o.total_shipping);
         if (has('total_price') && o.gateway) h += iCell(T.lbl_payment, o.gateway);
@@ -1816,13 +1879,6 @@
           h += '</div>';
         });
       }
-
-      // Note
-      if (o.note)
-        h +=
-          '<div style="margin-top:.6rem;font-size:.82rem;color:#475569;background:#fffbeb;padding:.5rem .7rem;border-radius:8px;border-left:3px solid #f59e0b">' +
-          esc(o.note) +
-          '</div>';
 
       var actionButtons = '';
       if (cfg.rebuy_enabled !== false && getRebuyItems(o).length) {
@@ -1964,6 +2020,14 @@
       });
       showErr(message || T.err_rate_limit);
     }
+    function resetCaptchaToken() {
+      captchaToken = '';
+      if (window.turnstile && captchaWidgetId !== null) {
+        try {
+          window.turnstile.reset(captchaWidgetId);
+        } catch (e) {}
+      }
+    }
     function hideCaptcha() {
       var wrap = document.getElementById('f1g-captcha');
       if (wrap) wrap.style.display = 'none';
@@ -1996,29 +2060,28 @@
     }
 
     // ─── Bug #26: Auto-resize iframe height when in inline mode ───
-    // When embedded as <iframe>, notify parent of actual document height so
-    // the parent can resize the iframe and avoid content clipping / layout jump.
     (function initAutoResize() {
-      // Only active in inline mode inside an iframe
       if (!isFramed()) return;
       var lastHeight = 0;
       function reportHeight() {
-        var h = document.documentElement.scrollHeight || document.body.scrollHeight || 0;
-        if (h === lastHeight) return;
+        if (displayMode !== 'inline') return;
+        var rect = root ? root.getBoundingClientRect() : null;
+        var h = rect ? Math.ceil(rect.height) + 32 : 0;
+        if (h < 120 || Math.abs(h - lastHeight) < 2) return;
         lastHeight = h;
         try {
-          window.parent.postMessage({ type: 'f1g_widget_height', height: h }, '*');
+          var targetOrigin = getParentOrigin(window.__f1gConfig || {}) || '*';
+          window.parent.postMessage({ type: 'f1g_widget_height', height: h }, targetOrigin);
         } catch (e) {}
       }
-      // Report on load
       reportHeight();
-      // Report on DOM mutations (results rendered, sections toggled)
-      if (typeof MutationObserver !== 'undefined') {
+      if (typeof ResizeObserver !== 'undefined' && root) {
+        new ResizeObserver(function () { reportHeight(); }).observe(root);
+      } else if (typeof MutationObserver !== 'undefined') {
         var mo = new MutationObserver(function () { setTimeout(reportHeight, 50); });
         mo.observe(document.body, { childList: true, subtree: true, attributes: true });
       }
-      // Fallback polling
-      setInterval(reportHeight, 400);
+      setInterval(reportHeight, 500);
     })();
 
   })();

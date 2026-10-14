@@ -182,14 +182,15 @@ model OrderIndex {
 }
 
 model OrderSyncState {
-  id           String    @id @default(cuid())
-  orgid        String    @unique
-  status       String    @default("pending")
-  nextPage     Int       @default(1)
-  indexedCount Int       @default(0)
-  startedAt    DateTime?
-  finishedAt   DateTime?
-  lastError    String?
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+  id              String    @id @default(cuid())
+  orgid           String    @unique
+  status          String    @default("pending")
+  backfillVersion Int       @default(1)
+  nextPage        Int       @default(1)
+  indexedCount    Int       @default(0)
+  startedAt       DateTime?
+  finishedAt      DateTime?
+  lastError       String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 }

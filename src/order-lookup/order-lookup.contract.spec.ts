@@ -259,6 +259,9 @@ describe('Order Lookup Contract Regression Suite', () => {
       expect(sentJs).toContain('items.reduce(function (promise, item) {');
       expect(sentJs).toContain('fetch("/cart/add.js"');
       expect(sentJs).toContain('window.location.href = "/cart";');
+      expect(sentJs).toContain('srcUrl.searchParams.set("parent_origin", window.location.origin);');
+      expect(sentJs).toContain('width:220px;height:64px');
+      expect(sentJs).toContain('if (data.type === "f1g_widget_disabled")');
     });
 
     it('disables the embed for shops whose trial or subscription expired', async () => {
@@ -293,6 +296,9 @@ describe('LookupRequestDto order_code contract', () => {
     expect(check('#100012')).toBe(0);
     expect(check('DH_1001')).toBe(0);
     expect(check('DH/2026/05')).toBe(0);
+    expect(check('#1')).toBe(0);
+    expect(check('1')).toBe(0);
+    expect(check('')).toBe(0);
   });
 
   it('rejects markup and quoting characters', () => {

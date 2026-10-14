@@ -58,7 +58,10 @@ export class LookupRequestDto {
     typeof value === 'string' ? value.trim() : value,
   )
   @IsString()
-  @MinLength(3)
+  @ValidateIf(
+    (_obj, value) => value !== undefined && value !== null && value !== '',
+  )
+  @MinLength(1)
   @MaxLength(30)
   @Matches(/^[A-Za-z0-9#_\/-]{1,30}$/, { message: 'Mã đơn hàng không hợp lệ' })
   order_code?: string;

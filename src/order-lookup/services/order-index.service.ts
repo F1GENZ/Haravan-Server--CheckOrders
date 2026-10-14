@@ -30,7 +30,6 @@ const toDateSafe = (val: unknown): Date | null => {
   const d = new Date(val as string | number | Date);
   return isNaN(d.getTime()) ? null : d;
 };
-
 export function extractOrderData(
   order: unknown,
   hashPhoneFn: (phone: string) => string,
@@ -131,9 +130,16 @@ export class OrderIndexService {
     try {
       const syncState = await client.orderSyncState.findUnique({
         where: { orgid },
-        select: { status: true },
+        select: { status: true, backfillVersion: true },
       });
-      return syncState?.status === 'ready';
+      if (syncState?.status !== 'ready') return false;
+      if (
+        typeof syncState.backfillVersion === 'number' &&
+        syncState.backfillVersion < 2
+      ) {
+        return false;
+      }
+      return true;
     } catch (error) {
       this.logger.warn(
         `Failed to check isReady for orgid=${orgid}: ${error instanceof Error ? error.message : String(error)}`,
@@ -150,6 +156,31 @@ export class OrderIndexService {
       this.prismaService.hashPhone(p),
     );
     if (!data) return;
+
+    if (typeof client.orderIndex.findUnique === 'function' && data.updatedAt) {
+      const existing = await client.orderIndex.findUnique({
+        where: {
+          orgid_haravanOrderId: {
+            orgid,
+            haravanOrderId: data.id,
+          },
+        },
+        select: {
+          haravanUpdatedAt: true,
+          cancelledAt: true,
+        },
+      });
+      if (
+        existing?.haravanUpdatedAt &&
+        existing.haravanUpdatedAt.getTime() > data.updatedAt.getTime() &&
+        (!data.cancelledAt || existing.cancelledAt)
+      ) {
+        this.logger.debug(
+          `Skipping stale order update for orgid=${orgid}, order=${data.id}`,
+        );
+        return;
+      }
+    }
 
     const encrypted = this.prismaService.encrypt(data.rawJson);
     if (!encrypted) {
@@ -287,12 +318,8 @@ export class OrderIndexService {
     const isReady = await this.isReady(orgid);
     if (isReady) return;
 
-    const syncState = await this.prismaService.client.orderSyncState.findUnique({
-      where: { orgid },
-      select: { status: true },
-    });
-    if (syncState?.status === 'running') return;
-
+    const lockKey = `checkorders:backfill:lock:${orgid}`;
+    if (await this.redisService.has(lockKey)) return;
     try {
       const accessToken = await this.haravanService.resolveAccessToken(orgid);
       if (!accessToken) return;
@@ -328,13 +355,21 @@ export class OrderIndexService {
       const syncState = await client.orderSyncState.findUnique({
         where: { orgid },
       });
-      if (syncState?.status === 'ready') {
+      const isV2Backfill =
+        typeof syncState?.backfillVersion !== 'number' ||
+        syncState.backfillVersion >= 2;
+      if (syncState?.status === 'ready' && isV2Backfill) {
         return;
       }
 
-      let page = syncState?.nextPage || 1;
-      let indexedCount = syncState?.indexedCount || 0;
-
+      let page =
+        syncState?.status === 'ready' && !isV2Backfill
+          ? 1
+          : syncState?.nextPage || 1;
+      let indexedCount =
+        syncState?.status === 'ready' && !isV2Backfill
+          ? 0
+          : syncState?.indexedCount || 0;
       await client.orderSyncState.upsert({
         where: { orgid },
         create: {
@@ -356,7 +391,7 @@ export class OrderIndexService {
       const pageRetries = new Map<number, number>();
 
       while (true) {
-        const url = `https://apis.haravan.com/com/orders.json?limit=50&page=${page}`;
+        const url = `https://apis.haravan.com/com/orders.json?status=any&limit=50&page=${page}`;
         let response;
         try {
           response = await axios.get<{ orders?: unknown[] }>(url, {
@@ -399,6 +434,7 @@ export class OrderIndexService {
             where: { orgid },
             data: {
               status: 'ready',
+              backfillVersion: 2,
               nextPage: page,
               indexedCount,
               finishedAt: new Date(),
@@ -419,7 +455,7 @@ export class OrderIndexService {
             indexedCount,
           },
         });
-
+        await this.redisService.set(lockKey, '1', 600);
         await sleep(600);
       }
     } catch (err) {

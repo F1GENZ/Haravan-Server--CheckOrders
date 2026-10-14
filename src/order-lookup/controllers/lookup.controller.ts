@@ -1,4 +1,7 @@
-import { serializeForScript } from '../utils/script-json.util';
+import {
+  getWidgetTemplateHtml,
+  serializeForScript,
+} from '../utils/script-json.util';
 import {
   Controller,
   Post,
@@ -18,8 +21,6 @@ import { StoreService } from '../services/store.service';
 import type { StoreRecord } from '../services/store.service';
 import { LookupRequestDto } from '../dto/lookup-request.dto';
 import type { LookupResponseDto } from '../dto/lookup-response.dto';
-import * as fs from 'fs';
-import * as path from 'path';
 
 const widgetApiUrl = (): string =>
   (process.env.WIDGET_API_URL || '').replace(/\/+$/, '');
@@ -145,9 +146,14 @@ export class LookupController {
       settings.widget_display_mode === 'trigger' ? 'trigger' : 'popup';
     const triggerAction =
       settings.widget_trigger_action === 'link' ? 'link' : 'modal';
-    const triggerLinkUrl = String(
+    const rawTriggerLinkUrl = String(
       settings.widget_trigger_link_url || '',
     ).trim();
+    const triggerLinkUrl = /^(https?:\/\/|\/)[^\s"'<>]*$/i.test(
+      rawTriggerLinkUrl,
+    )
+      ? rawTriggerLinkUrl
+      : '';
     const widgetEnabled =
       settings.widget_enabled !== false && this.storeService.isEntitled(store);
 
@@ -161,6 +167,11 @@ export class LookupController {
   if (embedMode === "popup" || embedMode === "trigger" || embedMode === "inline") {
     srcUrl.searchParams.set("launcher", embedMode);
   }
+  try {
+    if (window.location && window.location.origin) {
+      srcUrl.searchParams.set("parent_origin", window.location.origin);
+    }
+  } catch (e) {}
   var src = srcUrl.href;
   var widgetUrl = ${JSON.stringify(widgetUrl)};
   var displayMode = (embedMode === "popup" || embedMode === "trigger")
@@ -171,7 +182,12 @@ export class LookupController {
   var widgetEnabled = ${JSON.stringify(widgetEnabled)};
   if (document.getElementById(frameId)) return;
   if (!widgetEnabled) {
-    if (displayMode === "trigger") syncTriggerButtons(false);
+    if (displayMode === "trigger") {
+      syncTriggerButtons(false);
+      if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", function () { syncTriggerButtons(false); }, { once: true });
+      }
+    }
     return;
   }
   var frameLoaded = false;
@@ -182,7 +198,7 @@ export class LookupController {
   frame.src = src;
   frame.title = "Tra cứu đơn hàng";
   frame.loading = "lazy";
-  frame.style.cssText = "position:fixed;right:20px;bottom:20px;width:252px;height:96px;border:0;z-index:2147483647;background:transparent;";
+  frame.style.cssText = "position:fixed;right:20px;bottom:20px;width:220px;height:64px;border:0;z-index:2147483647;background:transparent;";
   frame.addEventListener("load", function () {
     frameLoaded = true;
     if (pendingOpen) {
@@ -218,6 +234,7 @@ export class LookupController {
       frame.style.bottom = "0";
       frame.style.width = "100vw";
       frame.style.height = "100vh";
+      frame.style.height = "100dvh";
     } else {
       if (displayMode === "trigger") {
         frame.style.display = "block";
@@ -237,8 +254,8 @@ export class LookupController {
         frame.style.top = "auto";
         frame.style.right = "20px";
         frame.style.bottom = "20px";
-        frame.style.width = "252px";
-        frame.style.height = "96px";
+        frame.style.width = "220px";
+        frame.style.height = "64px";
       }
     }
   }
@@ -295,6 +312,9 @@ export class LookupController {
   if (displayMode === "trigger") {
     setPopupFrame(false);
     syncTriggerButtons(widgetEnabled);
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", function () { syncTriggerButtons(widgetEnabled); }, { once: true });
+    }
     document.addEventListener("click", function (evt) {
       var el = evt.target && evt.target.closest
         ? evt.target.closest("[data-f1g-checkorders-open]")
@@ -335,6 +355,15 @@ export class LookupController {
   window.addEventListener("message", function (event) {
     if (event.source !== frame.contentWindow || event.origin !== widgetOrigin) return;
     var data = event.data || {};
+    if (data.type === "f1g_widget_disabled") {
+      if (data.disabled === true) {
+        widgetEnabled = false;
+        frame.style.display = "none";
+        frame.style.pointerEvents = "none";
+        syncTriggerButtons(false);
+      }
+      return;
+    }
 
     if (data.type === "f1g_widget_popup_state") {
       setPopupFrame(data.open === true);
@@ -387,7 +416,7 @@ export class LookupController {
 })();`;
 
     res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
-    res.setHeader('Cache-Control', 'public, max-age=300');
+    res.setHeader('Cache-Control', 'public, max-age=60');
     res.send(js);
   }
 
@@ -397,22 +426,7 @@ export class LookupController {
     res: Response,
   ) {
     // Read widget template
-    const widgetPath = path.join(
-      __dirname,
-      '..',
-      'widget',
-      'order-lookup.liquid',
-    );
-    let html = '';
-    try {
-      html = fs.readFileSync(widgetPath, 'utf-8');
-    } catch {
-      const srcPath = path.resolve(
-        process.cwd(),
-        'src/order-lookup/widget/order-lookup.liquid',
-      );
-      html = fs.readFileSync(srcPath, 'utf-8');
-    }
+    let html = getWidgetTemplateHtml();
 
     // Replace Liquid template tags
     const apiUrl = widgetApiUrl();
@@ -483,7 +497,7 @@ export class LookupController {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Tra cứu đơn hàng</title>
-  <style>html,body{margin:0;padding:0;height:100%;background:transparent}body{display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box}</style>
+  <style>html,body{margin:0;padding:0;min-height:100%;background:transparent}body{display:flex;align-items:flex-start;justify-content:center;padding:16px;box-sizing:border-box}</style>
 </head>
 <body>
 <script>window.__f1gConfig=${configPayload};</script>

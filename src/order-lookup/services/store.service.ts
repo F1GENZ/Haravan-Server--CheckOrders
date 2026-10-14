@@ -336,6 +336,35 @@ export class StoreService {
     };
   }
 
+  private sanitizeTriggerLinkUrl(raw: unknown): string {
+    const trimmed = String(raw || '')
+      .trim()
+      .slice(0, 500);
+    if (!trimmed) return '';
+    if (!/^(https?:\/\/|\/)[^\s"'<>]*$/i.test(trimmed)) {
+      return '';
+    }
+    return trimmed;
+  }
+
+  private async indexDomains(store: StoreRecord): Promise<void> {
+    if (store.is_active === false) return;
+    await Promise.all(
+      [
+        store.shop_domain,
+        store.custom_domain,
+        ...(store.shop_domains || []),
+      ]
+        .filter((domain): domain is string => Boolean(domain))
+        .map((domain) =>
+          this.redis.set(
+            `${DOMAIN_INDEX_PREFIX}:${this.normalizeDomain(domain)}`,
+            store.org_id,
+          ),
+        ),
+    );
+  }
+
   async getStoreByOrgId(orgId: string): Promise<StoreRecord | null> {
     const cached = await this.redis.get<StoreRecord>(
       `${STORE_PREFIX}:${orgId}`,
@@ -345,20 +374,7 @@ export class StoreService {
     const stored = await this.db?.findShopByOrgId(orgId);
     if (stored) {
       await this.redis.set(`${STORE_PREFIX}:${orgId}`, stored);
-      await Promise.all(
-        [
-          stored.shop_domain,
-          stored.custom_domain,
-          ...(stored.shop_domains || []),
-        ]
-          .filter((domain): domain is string => Boolean(domain))
-          .map((domain) =>
-            this.redis.set(
-              `${DOMAIN_INDEX_PREFIX}:${this.normalizeDomain(domain)}`,
-              orgId,
-            ),
-          ),
-      );
+      await this.indexDomains(stored);
     }
     return this.applyPremiumOverride(stored || null);
   }
@@ -372,10 +388,7 @@ export class StoreService {
 
     const stored = await this.db?.findShopByDomain(normalized);
     if (stored) {
-      await this.redis.set(
-        `${DOMAIN_INDEX_PREFIX}:${normalized}`,
-        stored.org_id,
-      );
+      await this.indexDomains(stored);
       await this.redis.set(`${STORE_PREFIX}:${stored.org_id}`, stored);
     }
     return this.applyPremiumOverride(stored || null);
@@ -405,7 +418,12 @@ export class StoreService {
 
   async existsByDomain(domain: string): Promise<boolean> {
     const normalized = this.normalizeDomain(domain);
-    return this.redis.has(`${DOMAIN_INDEX_PREFIX}:${normalized}`);
+    if (!normalized) return false;
+    if (await this.redis.has(`${DOMAIN_INDEX_PREFIX}:${normalized}`)) {
+      return true;
+    }
+    const store = await this.getStoreByDomain(normalized);
+    return Boolean(store && store.is_active);
   }
 
   async deactivateStore(orgId: string): Promise<void> {
@@ -471,11 +489,9 @@ export class StoreService {
       : 'inline';
     merged.widget_trigger_action =
       merged.widget_trigger_action === 'link' ? 'link' : 'modal';
-    merged.widget_trigger_link_url = String(
-      merged.widget_trigger_link_url || '',
-    )
-      .trim()
-      .slice(0, 500);
+    merged.widget_trigger_link_url = this.sanitizeTriggerLinkUrl(
+      merged.widget_trigger_link_url,
+    );
     merged.theme_text_color = /^#[0-9a-fA-F]{6}$/.test(
       String(merged.theme_text_color || ''),
     )
@@ -575,7 +591,7 @@ export class StoreService {
       widget_trigger_link_url:
         partial.widget_trigger_link_url === undefined
           ? current.widget_trigger_link_url
-          : String(partial.widget_trigger_link_url || '').trim().slice(0, 500),
+          : this.sanitizeTriggerLinkUrl(partial.widget_trigger_link_url),
       theme_text_color:
         partial.theme_text_color &&
         /^#[0-9a-fA-F]{6}$/.test(String(partial.theme_text_color))

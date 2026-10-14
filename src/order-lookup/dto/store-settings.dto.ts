@@ -6,9 +6,11 @@ import {
   IsArray,
   Min,
   Max,
+  MaxLength,
   IsIn,
   Matches,
   IsObject,
+  ValidateIf,
 } from 'class-validator';
 
 export const LOOKUP_METHODS = [
@@ -104,5 +106,14 @@ export class UpdateStoreSettingsDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(500)
+  @ValidateIf(
+    (_obj, value) =>
+      value !== undefined && value !== null && String(value).trim() !== '',
+  )
+  @Matches(/^(https?:\/\/|\/)[^\s"'<>]*$/i, {
+    message:
+      'Đường dẫn liên kết chỉ chấp nhận http://, https:// hoặc đường dẫn tương đối bắt đầu bằng /',
+  })
   widget_trigger_link_url?: string;
 }

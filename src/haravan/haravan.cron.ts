@@ -85,7 +85,7 @@ export class HaravanCronService {
     const appEntries = await this.fetchCandidateAppEntries();
 
     for (const { appData } of appEntries) {
-      if (!appData?.orgid || this.shouldSkip(appData)) continue;
+      if (!appData?.orgid || this.shouldSkipOrderSync(appData)) continue;
       const orgid = appData.orgid;
 
       // One-time webhook re-subscription for installed shops
@@ -179,7 +179,7 @@ export class HaravanCronService {
     }
   }
 
-  private shouldSkip(appData: AppInstallData): boolean {
+  private shouldSkipOrderSync(appData: AppInstallData): boolean {
     if (this.requiresInstall(appData)) {
       return true;
     }
@@ -196,6 +196,14 @@ export class HaravanCronService {
       appData.expires_at &&
       appData.expires_at <= Date.now()
     ) {
+      return true;
+    }
+
+    return false;
+  }
+
+  private shouldSkip(appData: AppInstallData): boolean {
+    if (this.shouldSkipOrderSync(appData)) {
       return true;
     }
 
@@ -231,18 +239,33 @@ export class HaravanCronService {
 
   private isProApp(appData: AppInstallData): boolean {
     const status = String(appData.status || '').toLowerCase();
-    const plan = String(appData.plan || '').toLowerCase();
-    const subscriptionStatus = String(
-      appData.subscription_status || '',
-    ).toLowerCase();
+    if (
+      [
+        'unactive',
+        'needs_reinstall',
+        'uninstalled',
+        'lapsed',
+        'canceled',
+        'cancelled',
+        'expired',
+        'declined',
+      ].includes(status)
+    ) {
+      return false;
+    }
     const hasValidExpiry =
       !appData.expires_at ||
       (typeof appData.expires_at === 'number' &&
         appData.expires_at > Date.now());
+    if (!hasValidExpiry) return false;
+    const plan = String(appData.plan || '').toLowerCase();
+    const subscriptionStatus = String(
+      appData.subscription_status || '',
+    ).toLowerCase();
     return (
       plan === 'pro' ||
       subscriptionStatus === 'active' ||
-      (['active', 'accepted', 'approved'].includes(status) && hasValidExpiry)
+      ['active', 'accepted', 'approved'].includes(status)
     );
   }
 

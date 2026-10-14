@@ -109,6 +109,16 @@ export class HaravanOrderService {
         normalizedCode,
       )}:max${maxOrders}`;
       const cached = await this.redis.get<CachedLookup>(cacheKey);
+      if (!Array.isArray(cached) && cached?.not_found) {
+        await this.saveTelemetry(storeId, {
+          cache_status: 'negative_hit',
+          result_count: 0,
+          pages_scanned: 0,
+          fallback_used: false,
+          duration_ms: Date.now() - startedAt,
+        });
+        return [];
+      }
       if (!Array.isArray(cached) && Array.isArray(cached?.orders)) {
         await this.saveTelemetry(storeId, {
           cache_status: 'hit',
@@ -126,11 +136,48 @@ export class HaravanOrderService {
         normalizedCode,
         maxOrders,
       );
-      const orders = await this.refreshIndexedOrders(
+      let orders = await this.refreshIndexedOrders(
         accessToken,
         storeId,
         indexed,
       );
+
+      if (indexed.length === 0 && (normalizedPhone || normalizedCode)) {
+        try {
+          const probe = await this.fetchOrdersFromHaravan(accessToken, 1, 1);
+          const matchedRecent = this.filterOrders(
+            probe.orders,
+            normalizedPhone,
+            normalizedCode,
+          );
+          if (matchedRecent.length > 0) {
+            for (const order of matchedRecent) {
+              void this.orderIndexService
+                .upsertOrder(storeId, order)
+                .catch((err) =>
+                  this.logger.warn(
+                    `Recent probe index upsert failed for order ${order.id}: ${err instanceof Error ? err.message : String(err)}`,
+                  ),
+                );
+            }
+            orders = matchedRecent.slice(0, maxOrders);
+          } else {
+            await this.redis.set(
+              cacheKey,
+              { not_found: true },
+              this.getPositiveConfig(
+                'ORDER_LOOKUP_NEGATIVE_CACHE_SECONDS',
+                DEFAULT_NEGATIVE_CACHE_SECONDS,
+              ),
+            );
+          }
+        } catch (probeErr) {
+          this.logger.warn(
+            `Recent page-1 probe failed for store ${storeId}: ${probeErr instanceof Error ? probeErr.message : String(probeErr)}`,
+          );
+        }
+      }
+
       if (orders.length > 0) {
         await this.redis.set(
           cacheKey,
@@ -214,34 +261,50 @@ export class HaravanOrderService {
     );
     let pagesScanned = recentResult.pagesScanned;
     let fallbackUsed = false;
+    let fallbackSkipped = false;
 
     if (
       filtered.length === 0 &&
       (normalizedPhone || normalizedCode.length >= 4)
     ) {
-      fallbackUsed = true;
-      const fallbackLookbackDays = this.getPositiveConfig(
-        'ORDER_LOOKUP_FALLBACK_LOOKBACK_DAYS',
-        DEFAULT_FALLBACK_LOOKBACK_DAYS,
-      );
-      const fallbackMaxPages = this.getPositiveConfig(
-        'ORDER_LOOKUP_FALLBACK_MAX_PAGES',
-        DEFAULT_FALLBACK_MAX_PAGES,
-      );
-      this.logger.debug(
-        `Fallback lookup for ${storeId} with lookback=${fallbackLookbackDays} days, pages=${fallbackMaxPages}`,
-      );
-      const deepResult = await this.fetchOrdersFromHaravan(
-        accessToken,
-        fallbackLookbackDays,
-        fallbackMaxPages,
-      );
-      pagesScanned += deepResult.pagesScanned;
-      filtered = this.filterOrders(
-        deepResult.orders,
-        normalizedPhone,
-        normalizedCode,
-      );
+      const fallbackLockKey = `haravan:checkorders:fallback_lock:${cacheKey}`;
+      const canRunDeepFallback =
+        typeof this.redis.setNx === 'function'
+          ? await this.redis.setNx(fallbackLockKey, '1', 15)
+          : true;
+      if (!canRunDeepFallback) {
+        fallbackSkipped = true;
+      } else {
+        try {
+          fallbackUsed = true;
+          const fallbackLookbackDays = this.getPositiveConfig(
+            'ORDER_LOOKUP_FALLBACK_LOOKBACK_DAYS',
+            DEFAULT_FALLBACK_LOOKBACK_DAYS,
+          );
+          const fallbackMaxPages = this.getPositiveConfig(
+            'ORDER_LOOKUP_FALLBACK_MAX_PAGES',
+            DEFAULT_FALLBACK_MAX_PAGES,
+          );
+          this.logger.debug(
+            `Fallback lookup for ${storeId} with lookback=${fallbackLookbackDays} days, pages=${fallbackMaxPages}`,
+          );
+          const deepResult = await this.fetchOrdersFromHaravan(
+            accessToken,
+            fallbackLookbackDays,
+            fallbackMaxPages,
+          );
+          pagesScanned += deepResult.pagesScanned;
+          filtered = this.filterOrders(
+            deepResult.orders,
+            normalizedPhone,
+            normalizedCode,
+          );
+        } finally {
+          if (typeof this.redis.del === 'function') {
+            await this.redis.del(fallbackLockKey);
+          }
+        }
+      }
     }
 
     if (filtered.length > 0) {
@@ -253,7 +316,7 @@ export class HaravanOrderService {
           DEFAULT_CACHE_SECONDS,
         ),
       );
-    } else {
+    } else if (!fallbackSkipped) {
       await this.redis.set(
         cacheKey,
         { not_found: true },

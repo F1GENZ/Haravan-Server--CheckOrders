@@ -506,4 +506,80 @@ describe('LookupService order normalization', () => {
     expect(items[0].variant_title).toBeUndefined();
     expect(items[1].variant_title).toBe('10 oz');
   });
+
+  it('preserves province when masking shipping address instead of masking to ***Vietnam', async () => {
+    const result = await lookupWith(
+      {
+        order_number: 10001,
+        name: '#10001',
+        financial_status: 'paid',
+        shipping_address: {
+          address1: '123 Nguyễn Huệ',
+          ward: 'Phường Bến Nghé',
+          district: 'Quận 1',
+          province: 'TP. Hồ Chí Minh',
+          country: 'Vietnam',
+        },
+      },
+      ['order_number', 'shipping_address'],
+    );
+
+    expect(result.shipping_address).toBe('***TP. Hồ Chí Minh');
+  });
+
+  it('masks customer_name and contact PII when looking up by order_code without phone (Q1) and formats non-VND currency (Q4)', async () => {
+    const { service, storeService, haravanOrderService } = createService();
+    haravanOrderService.lookupOrders.mockResolvedValueOnce([
+      {
+        order_number: 10009,
+        name: '#10009',
+        financial_status: 'paid',
+        currency: 'USD',
+        total_price: '120',
+        phone: '0901234567',
+        email: 'nguyenvanan@gmail.com',
+        billing_address: { name: 'Nguyễn Văn An' },
+        shipping_address: {
+          address1: '123 Nguyễn Huệ',
+          province: 'TP. Hồ Chí Minh',
+        },
+        note: 'Internal secret note',
+      },
+    ]);
+    storeService.getSettings.mockResolvedValueOnce({
+      ...baseSettings,
+      lookup_method: 'order_code',
+      mask_phone: false,
+      mask_email: false,
+      mask_address: false,
+      visible_fields: [
+        'order_number',
+        'total_price',
+        'customer_name',
+        'phone',
+        'email',
+        'shipping_address',
+      ],
+    });
+
+    const response = await service.lookup(
+      'shop',
+      undefined,
+      '#10009',
+      '203.0.113.10',
+      'https://checkorders.example.com',
+      'https://shop.myharavan.com',
+      undefined,
+      'checkorders.example.com',
+    );
+
+    expect(response.success).toBe(true);
+    const order = response.orders![0] as unknown as Record<string, unknown>;
+    expect(order.customer_name).toBe('Nguyễn *** An');
+    expect(order.phone).toBe('090***4567');
+    expect(order.email).toBe('n***@gmail.com');
+    expect(order.shipping_address).toBe('***TP. Hồ Chí Minh');
+    expect(order.total_price).toBe('120 USD');
+    expect(order.note).toBeUndefined();
+  });
 });

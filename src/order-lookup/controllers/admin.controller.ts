@@ -1,4 +1,7 @@
-import { serializeForScript } from '../utils/script-json.util';
+import {
+  getWidgetTemplateHtml,
+  serializeForScript,
+} from '../utils/script-json.util';
 import {
   Controller,
   Get,
@@ -23,8 +26,6 @@ import { UpdateStoreSettingsDto } from '../dto/store-settings.dto';
 import { HaravanService } from '../../haravan/haravan.service';
 import { RedisService } from '../../redis/redis.service';
 import { PrismaService } from '../../database/prisma.service';
-import * as fs from 'fs';
-import * as path from 'path';
 
 const LOG_PREFIX = 'haravan:checkorders:log';
 const TELEMETRY_PREFIX = 'haravan:checkorders:telemetry';
@@ -92,7 +93,7 @@ export class AdminController {
         shop_domain: store.shop_domain,
         public_shop: publicShopIdentifier(store),
         installed_at: store.installed_at,
-        expires_at: store.expires_at || addDaysIso(store.installed_at, 15),
+        expires_at: store.expires_at || addDaysIso(store.installed_at, 7),
         status: store.status || 'trial',
         plan: store.plan || planFromStatus(store.status),
         is_active: store.is_active,
@@ -163,7 +164,7 @@ export class AdminController {
           status: store.status || 'trial',
           plan: store.plan || planFromStatus(store.status),
           installed_at: store.installed_at,
-          expires_at: store.expires_at || addDaysIso(store.installed_at, 15),
+          expires_at: store.expires_at || addDaysIso(store.installed_at, 7),
         },
         widget: {
           enabled: settings.widget_enabled !== false,
@@ -208,22 +209,7 @@ export class AdminController {
     if (!store) throw new BadRequestException('Store not found');
     const settings = await this.storeService.getSettings(orgId);
 
-    const widgetPath = path.join(
-      __dirname,
-      '..',
-      'widget',
-      'order-lookup.liquid',
-    );
-    let html = '';
-    try {
-      html = fs.readFileSync(widgetPath, 'utf-8');
-    } catch {
-      const srcPath = path.resolve(
-        process.cwd(),
-        'src/order-lookup/widget/order-lookup.liquid',
-      );
-      html = fs.readFileSync(srcPath, 'utf-8');
-    }
+    let html = getWidgetTemplateHtml();
 
     html = html.replace(
       /\{\{\s*settings\.f1g_order_api_url(?:\s*\|\s*default:\s*('[^']*'|"[^"]*"))?\s*\}\}/g,
@@ -239,7 +225,7 @@ export class AdminController {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <style>html,body{margin:0;padding:0;height:100%;background:transparent}body{display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box}</style>
+  <style>html,body{margin:0;padding:0;min-height:100%;background:transparent}body{display:flex;align-items:flex-start;justify-content:center;padding:16px;box-sizing:border-box}</style>
 </head>
 <body>
 <script>window.__f1gConfig=${serializeForScript({

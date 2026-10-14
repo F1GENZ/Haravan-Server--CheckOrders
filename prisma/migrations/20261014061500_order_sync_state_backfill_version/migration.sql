@@ -1,0 +1,2 @@
+-- AlterTable
+ALTER TABLE "OrderSyncState" ADD COLUMN IF NOT EXISTS "backfillVersion" INTEGER NOT NULL DEFAULT 1;

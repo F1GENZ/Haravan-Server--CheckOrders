@@ -1,5 +1,6 @@
 import type { ConfigService } from '@nestjs/config';
 import axios from 'axios';
+import * as crypto from 'crypto';
 import { HaravanOrderService } from './haravan-order.service';
 
 jest.mock('axios');
@@ -12,9 +13,18 @@ class RedisMock {
   get<T = unknown>(key: string): T | null {
     return (this.store.get(key) as T | undefined) || null;
   }
-
   set(key: string, value: unknown) {
     this.store.set(key, value);
+  }
+
+  setNx(key: string, value: unknown) {
+    if (this.store.has(key)) return false;
+    this.store.set(key, value);
+    return true;
+  }
+
+  del(key: string) {
+    return this.store.delete(key) ? 1 : 0;
   }
 }
 
@@ -263,6 +273,51 @@ describe('HaravanOrderService lookup filtering', () => {
     expect(second).toHaveLength(2);
     expect(mockedAxios.get.mock.calls).toHaveLength(1);
   });
+
+  it('does not poison negative cache when a concurrent deep fallback lock is held', async () => {
+    const redis = new RedisMock();
+    const queryHash = crypto
+      .createHash('sha256')
+      .update('0901234567:10001')
+      .digest('hex')
+      .slice(0, 16);
+    const lockKey = `haravan:checkorders:fallback_lock:haravan:checkorders:cache:store-locked:${queryHash}`;
+    redis.set(lockKey, '1');
+    const service = new HaravanOrderService(config, redis as never);
+
+    mockedAxios.get.mockResolvedValueOnce({
+      data: { orders: [] },
+    });
+
+    const first = await service.lookupOrders(
+      'access-token',
+      'store-locked',
+      '0901234567',
+      '#10001',
+      5,
+    );
+    expect(first).toEqual([]);
+
+    // Release fallback lock and provide matching order on retry; must NOT hit negative cache
+    redis.del(lockKey);
+    mockedAxios.get.mockResolvedValueOnce({
+      data: {
+        orders: [
+          { id: 77, name: '#10001', order_number: 10001, phone: '0901234567' },
+        ],
+      },
+    });
+
+    const second = await service.lookupOrders(
+      'access-token',
+      'store-locked',
+      '0901234567',
+      '#10001',
+      5,
+    );
+    expect(second).toHaveLength(1);
+    expect(second[0].id).toBe(77);
+  });
 });
 
 describe('HaravanOrderService DB order index integration', () => {
@@ -275,6 +330,7 @@ describe('HaravanOrderService DB order index integration', () => {
       isReady: jest.fn().mockResolvedValue(true),
       search: jest.fn().mockResolvedValue(indexed),
       upsertOrder: jest.fn().mockResolvedValue(undefined),
+      deleteOrder: jest.fn().mockResolvedValue(undefined),
       ensureBackfill: jest.fn().mockResolvedValue(undefined),
     };
     const service = new HaravanOrderService(
@@ -349,8 +405,8 @@ describe('HaravanOrderService DB order index integration', () => {
     expect(second.map((o) => o.id)).toEqual([1, 2, 3]);
   });
 
-  it('drops indexed orders that no longer exist on Haravan', async () => {
-    const { service } = createIndexedService([
+  it('hides indexed orders missing from the live refresh without deleting their index rows', async () => {
+    const { service, orderIndexServiceMock } = createIndexedService([
       { id: 1, name: '#1' },
       { id: 2, name: '#2' },
     ]);
@@ -361,6 +417,7 @@ describe('HaravanOrderService DB order index integration', () => {
     const results = await service.lookupOrders('token', 'store_ready', '0901234567');
 
     expect(results.map((order) => order.id)).toEqual([2]);
+    expect(orderIndexServiceMock.deleteOrder).not.toHaveBeenCalled();
   });
 
   it('serves the indexed copy when Haravan is temporarily unreachable', async () => {
@@ -421,5 +478,36 @@ describe('HaravanOrderService DB order index integration', () => {
     expect(mockedAxios.get).toHaveBeenCalled();
     expect(results).toHaveLength(1);
     expect(results[0].id).toBe(888);
+  });
+
+  it('probes page 1 and indexes newly created orders when DB index returns empty', async () => {
+    const { service, orderIndexServiceMock } = createIndexedService([]);
+    mockedAxios.get.mockResolvedValueOnce({
+      data: {
+        orders: [
+          {
+            id: 9001,
+            order_number: 9001,
+            name: '#9001',
+            phone: '0901234567',
+          },
+        ],
+      },
+    });
+
+    const results = await service.lookupOrders(
+      'token',
+      'store_ready',
+      '0901234567',
+      '#9001',
+      5,
+    );
+
+    expect(results).toHaveLength(1);
+    expect(results[0].id).toBe(9001);
+    expect(orderIndexServiceMock.upsertOrder).toHaveBeenCalledWith(
+      'store_ready',
+      expect.objectContaining({ id: 9001 }),
+    );
   });
 });

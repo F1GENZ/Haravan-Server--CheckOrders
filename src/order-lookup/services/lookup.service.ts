@@ -243,9 +243,12 @@ export class LookupService {
       }
 
       // 6. Transform, mask, and filter
+      const lookedUpWithoutPhone = !normalizedPhone;
       const results = orders.map((order) => {
         const normalized = this.normalizeOrder(order);
-        const masked = this.maskingService.applyMasking(normalized, settings);
+        const masked = this.maskingService.applyMasking(normalized, settings, {
+          lookedUpWithoutPhone,
+        });
         const filtered = this.maskingService.filterFields(
           masked,
           settings.visible_fields,
@@ -460,12 +463,15 @@ export class LookupService {
       class: 'pending',
     };
 
+    const rawCurrency = (textValue(order.currency) || 'VND').toUpperCase();
     const fmtPrice = (v: unknown) => {
       if (v === undefined || v === null || v === '') return undefined;
       const amount = Number(v);
-      return Number.isFinite(amount)
-        ? amount.toLocaleString('vi-VN') + '₫'
-        : undefined;
+      if (!Number.isFinite(amount)) return undefined;
+      const formatted = amount.toLocaleString('vi-VN');
+      return !rawCurrency || rawCurrency === 'VND'
+        ? `${formatted}₫`
+        : `${formatted} ${rawCurrency}`;
     };
     const fmtDate = (v: unknown) =>
       v
@@ -512,7 +518,6 @@ export class LookupService {
         str(addr.district),
         str(addr.city),
         str(addr.province),
-        str(addr.country),
       ]
         .filter(Boolean)
         .join(', ');

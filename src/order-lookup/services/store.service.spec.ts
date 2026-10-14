@@ -234,4 +234,78 @@ describe('StoreService.isEntitled', () => {
       delete process.env.PREMIUM_ORGIDS;
     }
   });
+
+  it('falls back to PostgreSQL in existsByDomain when Redis domain index misses and sanitizes unsafe trigger URLs', async () => {
+    const redis = new RedisMock();
+    const db = {
+      findShopByDomain: jest.fn().mockResolvedValue({
+        org_id: 'org-custom',
+        shop_domain: 'custom.myharavan.com',
+        custom_domain: 'orders.brand.vn',
+        shop_domains: ['custom.myharavan.com', 'orders.brand.vn'],
+        access_token: 'tok',
+        is_active: true,
+        installed_at: '2026-10-10T00:00:00.000Z',
+        status: 'active',
+        plan: 'Pro',
+      }),
+      findSettings: jest.fn().mockResolvedValue(null),
+      upsertSettings: jest.fn().mockResolvedValue(undefined),
+    };
+    const svc = new StoreService(redis as never, db as never);
+
+    const exists = await svc.existsByDomain('https://www.orders.brand.vn/');
+    expect(exists).toBe(true);
+    expect(db.findShopByDomain).toHaveBeenCalledWith('orders.brand.vn');
+    expect(await redis.has('haravan:checkorders:domain:orders.brand.vn')).toBe(
+      true,
+    );
+
+    const updated = await svc.updateSettings('org-custom', {
+      widget_trigger_link_url: 'javascript:alert(1)',
+    });
+    expect(updated.widget_trigger_link_url).toBe('');
+  });
+
+  it('does not re-index domain in Redis after deactivateStore and Redis flush on either getStoreByDomain or getStoreByOrgId', async () => {
+    const redis = new RedisMock();
+    const shopState = {
+      org_id: 'org-uninstalled',
+      shop_domain: 'gone.myharavan.com',
+      custom_domain: 'gone.brand.vn',
+      shop_domains: ['gone.myharavan.com', 'gone.brand.vn'],
+      access_token: 'tok',
+      is_active: true,
+      installed_at: '2026-10-01T00:00:00.000Z',
+      status: 'active',
+      plan: 'Trial',
+    };
+    const db = {
+      findShopByOrgId: jest.fn().mockImplementation(async () => ({ ...shopState })),
+      findShopByDomain: jest.fn().mockImplementation(async () => ({ ...shopState })),
+      markShopInactive: jest.fn().mockImplementation(async () => {
+        shopState.is_active = false;
+        shopState.status = 'uninstalled';
+        shopState.access_token = '';
+      }),
+    };
+    const svc = new StoreService(redis as never, db as never);
+
+    await svc.deactivateStore('org-uninstalled');
+    // Simulate Redis restart/eviction
+    await redis.del('haravan:checkorders:store:org-uninstalled');
+    await redis.del('haravan:checkorders:domain:gone.brand.vn');
+    await redis.del('haravan:checkorders:domain:gone.myharavan.com');
+
+    expect(await svc.existsByDomain('https://gone.brand.vn')).toBe(false);
+    expect(await svc.existsByDomain('https://gone.brand.vn')).toBe(false);
+
+    // Also verify getStoreByOrgId rehydration does not re-index domains when inactive
+    await redis.del('haravan:checkorders:store:org-uninstalled');
+    await svc.getStoreByOrgId('org-uninstalled');
+    expect(await redis.has('haravan:checkorders:domain:gone.brand.vn')).toBe(
+      false,
+    );
+    expect(await svc.existsByDomain('https://gone.brand.vn')).toBe(false);
+  });
 });

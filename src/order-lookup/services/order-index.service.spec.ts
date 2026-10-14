@@ -55,6 +55,7 @@ describe('OrderIndexService', () => {
   let redisMock: RedisMock;
   let haravanServiceMock: Partial<HaravanService>;
   let orderIndexMock: {
+    findUnique: jest.Mock;
     upsert: jest.Mock;
     deleteMany: jest.Mock;
     findMany: jest.Mock;
@@ -75,6 +76,7 @@ describe('OrderIndexService', () => {
     prismaService = new PrismaService(config);
 
     orderIndexMock = {
+      findUnique: jest.fn().mockResolvedValue(null),
       upsert: jest.fn().mockResolvedValue({}),
       deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
       findMany: jest.fn().mockResolvedValue([]),
@@ -380,6 +382,67 @@ describe('OrderIndexService', () => {
       expect(orderSyncStateMock.deleteMany).toHaveBeenCalledWith({
         where: { orgid: 'store_1' },
       });
+    });
+
+    it('requests status=any during backfill and resumes stale running state when Redis lock is gone', async () => {
+      orderSyncStateMock.findUnique.mockResolvedValue({
+        status: 'running',
+        nextPage: 2,
+        indexedCount: 50,
+      });
+      mockedAxios.get.mockResolvedValueOnce({
+        data: {
+          orders: [
+            { id: 4001, order_number: 4001, name: '#4001', phone: '0901234567' },
+          ],
+        },
+      });
+
+      await service.ensureBackfill('store_resume');
+
+      expect(mockedAxios.get).toHaveBeenCalledWith(
+        'https://apis.haravan.com/com/orders.json?status=any&limit=50&page=2',
+        expect.any(Object),
+      );
+      expect(orderSyncStateMock.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { orgid: 'store_resume' },
+          data: expect.objectContaining({
+            status: 'ready',
+            backfillVersion: 2,
+            finishedAt: expect.any(Date),
+          }),
+        }),
+      );
+
+      orderSyncStateMock.findUnique.mockResolvedValueOnce({
+        status: 'ready',
+        backfillVersion: 1,
+      });
+      expect(await service.isReady('store_legacy')).toBe(false);
+
+      orderSyncStateMock.findUnique.mockResolvedValueOnce({
+        status: 'ready',
+        backfillVersion: 2,
+      });
+      expect(await service.isReady('store_v2')).toBe(true);
+    });
+
+    it('skips out-of-order stale webhook updates when existing haravanUpdatedAt is newer', async () => {
+      orderIndexMock.findUnique.mockResolvedValueOnce({
+        haravanUpdatedAt: new Date('2026-10-14T12:00:00Z'),
+        cancelledAt: new Date('2026-10-14T12:00:00Z'),
+      });
+
+      await service.upsertOrder('store_1', {
+        id: 5555,
+        order_number: 5555,
+        name: '#5555',
+        phone: '0901234567',
+        updated_at: '2026-10-14T10:00:00Z',
+      });
+
+      expect(orderIndexMock.upsert).not.toHaveBeenCalled();
     });
   });
 });
