@@ -1225,6 +1225,11 @@
         return;
       }
       setLoading(true);
+      allOrders = [];
+      listEl.innerHTML = '';
+      listEl.style.display = 'none';
+      pagingEl.style.display = 'none';
+      emptyEl.style.display = 'block';
       var body = {};
       if (lookupMethod === 'phone_and_code') {
         body.phone = phone;
