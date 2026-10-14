@@ -108,6 +108,24 @@ export class HaravanCronService {
     }
   }
 
+  @Cron(CronExpression.EVERY_6_HOURS)
+  async handleSubscriptionCron() {
+    this.logger.log('Running subscription reconcile cron...');
+    const appEntries = await this.fetchCandidateAppEntries();
+
+    for (const { appData } of appEntries) {
+      if (!appData?.orgid || this.requiresInstall(appData)) continue;
+      try {
+        await this.haravanService.reconcileSubscription(appData.orgid);
+      } catch (error) {
+        this.logger.warn(
+          `Subscription reconcile failed for orgid=${appData.orgid}: ${getErrorMessage(error)}`,
+        );
+      }
+      await sleep(500);
+    }
+  }
+
   private async ensureWebhooksResubscribed(orgid: string): Promise<void> {
     const key = `haravan:checkorders:webhooks_resubscribed_v2:${orgid}`;
     const alreadyDone = await this.redisService.has(key);

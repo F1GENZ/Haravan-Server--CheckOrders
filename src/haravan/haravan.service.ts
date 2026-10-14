@@ -1422,6 +1422,13 @@ export class HaravanService {
       if (!orgid) throw new BadRequestException('Missing orgid in id_token');
       this.logger.log(`Install orgid: ${orgid} orgsub: ${orgsub}`);
 
+      try {
+        await this.reconcileSubscription(orgid, access_token);
+      } catch (subscriptionError) {
+        this.logger.warn(
+          `Subscription reconcile failed for orgid=${orgid}: ${getErrorMessage(subscriptionError)}`,
+        );
+      }
       const existingApp = await this.getInstallSession(orgid);
       let shopData: Record<string, unknown> = {};
       try {
@@ -1436,7 +1443,10 @@ export class HaravanService {
       await this.subscribeWebhooks(access_token);
       const subscriptionSnapshot = await this.getSubscriptionSnapshot(orgid);
       const hasActiveSubscription =
-        Boolean(subscriptionSnapshot?.is_active) || this.isProApp(existingApp);
+        isPremiumOrg(orgid) ||
+        (subscriptionSnapshot
+          ? subscriptionSnapshot.is_active
+          : this.isProApp(existingApp));
       const existingNeedsInstall =
         existingApp && !this.isProApp(existingApp)
           ? this.requiresInstall(existingApp)
@@ -1951,13 +1961,88 @@ export class HaravanService {
     const orgid = await this.resolveWebhookOrgid(req, body, subscription);
     if (!orgid) throw new BadRequestException('Missing orgid');
 
+    const snapshot = await this.applySubscription(orgid, subscription);
+    await this.notificationService?.notify('APP_SUBSCRIPTION_UPDATE', {
+      orgid,
+      status: snapshot.status,
+      plan: snapshot.plan,
+      expires_at: snapshot.expires_at,
+    });
+    await this.db?.recordWebhook({
+      topic,
+      orgid,
+      payload: body,
+      headers: this.pickWebhookHeaders(req),
+      status: 'processed',
+    });
+    this.logger.log(`Subscription synced for orgid=${orgid}`);
+    return { ok: true, topic, orgid, subscription: snapshot };
+  }
+
+  async reconcileSubscription(
+    orgid: string,
+    accessToken?: string,
+  ): Promise<SubscriptionSnapshot | null> {
+    const token = accessToken || (await this.resolveAccessToken(orgid));
+    const subscriptions = await this.haravanAPI.getAppSubscriptions(token);
+    const subscription = this.pickCurrentSubscription(subscriptions);
+    if (!subscription) return null;
+
+    const previous = await this.getSubscriptionSnapshot(orgid);
+    const snapshot = await this.applySubscription(orgid, subscription);
+    if (
+      previous?.status !== snapshot.status ||
+      previous?.expires_at !== snapshot.expires_at
+    ) {
+      await this.notificationService?.notify('APP_SUBSCRIPTION_UPDATE', {
+        orgid,
+        status: snapshot.status,
+        plan: snapshot.plan,
+        expires_at: snapshot.expires_at,
+      });
+      this.logger.log(`Subscription reconciled for orgid=${orgid}`);
+    }
+    return snapshot;
+  }
+
+  private pickCurrentSubscription(
+    subscriptions: Record<string, unknown>[],
+  ): Record<string, unknown> | null {
+    const clientId = this.getHaravanConfig().clientId;
+    const own = subscriptions.filter((s) => {
+      const id = asString(s.client_id);
+      return !id || id === clientId;
+    });
+    if (own.length === 0) return null;
+    const rank = (s: Record<string, unknown>) => {
+      const expiresAt = this.getSubscriptionExpiresAt(s);
+      const active = this.isSubscriptionActive(
+        s,
+        this.normalizeSubscriptionStatus(s),
+        expiresAt,
+      );
+      return [active ? 1 : 0, expiresAt || 0] as const;
+    };
+    return own.reduce((best, s) => {
+      const [a, e] = rank(s);
+      const [ba, be] = rank(best);
+      return a > ba || (a === ba && e > be) ? s : best;
+    });
+  }
+
+  private async applySubscription(
+    orgid: string,
+    subscription: Record<string, unknown>,
+  ): Promise<SubscriptionSnapshot> {
     const now = Date.now();
     const status = this.normalizeSubscriptionStatus(subscription);
     const expiresAt = this.getSubscriptionExpiresAt(subscription);
     const active = this.isSubscriptionActive(subscription, status, expiresAt);
+    const lapsed =
+      !active && ['active', 'accepted', 'approved'].includes(status);
     const snapshot: SubscriptionSnapshot = {
       orgid,
-      status: active ? 'active' : status,
+      status: active ? 'active' : lapsed ? 'lapsed' : status,
       plan: active ? 'Pro' : 'Free',
       is_active: active,
       expires_at: active
@@ -1999,22 +2084,7 @@ export class HaravanService {
       await this.saveInstallSession(orgid, updated);
       await this.syncStoreFromInstallData(orgid, updated);
     }
-
-    await this.notificationService?.notify('APP_SUBSCRIPTION_UPDATE', {
-      orgid,
-      status: snapshot.status,
-      plan: snapshot.plan,
-      expires_at: snapshot.expires_at,
-    });
-    await this.db?.recordWebhook({
-      topic,
-      orgid,
-      payload: body,
-      headers: this.pickWebhookHeaders(req),
-      status: 'processed',
-    });
-    this.logger.log(`Subscription synced for orgid=${orgid}`);
-    return { ok: true, topic, orgid, subscription: snapshot };
+    return snapshot;
   }
 
   private pickWebhookHeaders(req: Request): Record<string, unknown> {

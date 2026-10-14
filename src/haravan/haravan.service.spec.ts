@@ -181,7 +181,10 @@ describe('HaravanService OAuth security', () => {
       deleteOrder: jest.fn().mockResolvedValue(undefined),
       purgeOrg: jest.fn().mockResolvedValue(undefined),
     };
-    const haravanApi = { getShop: jest.fn().mockResolvedValue({}) };
+    const haravanApi = {
+      getShop: jest.fn().mockResolvedValue({}),
+      getAppSubscriptions: jest.fn().mockResolvedValue([]),
+    };
     const service = new HaravanService(
       makeConfig(),
       redis as never,
@@ -416,6 +419,57 @@ describe('HaravanService OAuth security', () => {
     expect(
       redis.store.get('haravan:checkorders:app_install:org_1')?.expiresAt,
     ).toBeUndefined();
+  });
+
+  it('reconciles the paid plan from Haravan when the webhook never arrived', async () => {
+    const { service, redis, haravanApi } = createService();
+    const paidUntil = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000);
+    redis.set('haravan:checkorders:app_install:org_1', {
+      orgid: 'org_1',
+      access_token: 'live-token',
+      token_expires_at: Date.now() + 60 * 60 * 1000,
+      status: 'trial',
+      plan: 'Trial',
+      expires_at: Date.now() - 60 * 1000,
+    });
+    haravanApi.getAppSubscriptions.mockResolvedValueOnce([
+      { client_id: 'another-app', status: 'active', expired_at: '2099-01-01T00:00:00Z' },
+      { client_id: CLIENT_ID, status: 'canceled', cancelled_at: '2026-01-01T00:00:00Z', expired_at: '2026-02-01T00:00:00Z' },
+      { client_id: CLIENT_ID, status: 'active', cancelled_at: null, expired_at: paidUntil.toISOString() },
+    ]);
+
+    const snapshot = await service.reconcileSubscription('org_1');
+
+    expect(haravanApi.getAppSubscriptions).toHaveBeenCalledWith('live-token');
+    expect(snapshot).toEqual(
+      expect.objectContaining({ status: 'active', plan: 'Pro', is_active: true, expires_at: paidUntil.getTime() }),
+    );
+    expect(redis.get('haravan:checkorders:app_install:org_1')).toEqual(
+      expect.objectContaining({ status: 'active', plan: 'Pro', expires_at: paidUntil.getTime() }),
+    );
+  });
+
+  it('stops the paid plan when its paid period has ended without renewal', async () => {
+    const { service, redis, haravanApi } = createService();
+    const endedAt = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    redis.set('haravan:checkorders:app_install:org_1', {
+      orgid: 'org_1',
+      access_token: 'live-token',
+      token_expires_at: Date.now() + 60 * 60 * 1000,
+      status: 'active',
+      plan: 'Pro',
+      subscription_status: 'active',
+      expires_at: Date.now() + 10 * 365 * 24 * 60 * 60 * 1000,
+    });
+    haravanApi.getAppSubscriptions.mockResolvedValueOnce([
+      { client_id: CLIENT_ID, status: 'active', cancelled_at: null, expired_at: endedAt.toISOString() },
+    ]);
+
+    await service.reconcileSubscription('org_1');
+
+    expect(redis.get('haravan:checkorders:app_install:org_1')).toEqual(
+      expect.objectContaining({ status: 'lapsed', plan: 'Free', expires_at: endedAt.getTime() }),
+    );
   });
 
   it('keeps Pro app session available when token was marked invalid_grant', async () => {

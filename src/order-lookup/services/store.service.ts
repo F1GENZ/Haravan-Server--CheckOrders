@@ -46,7 +46,7 @@ const VISIBLE_FIELDS_VERSION = 2;
 const STORE_PREFIX = 'haravan:checkorders:store';
 const SETTINGS_PREFIX = 'haravan:checkorders:settings';
 const DOMAIN_INDEX_PREFIX = 'haravan:checkorders:domain';
-const TRIAL_DAYS = 15;
+const TRIAL_DAYS = 7;
 
 const DEFAULT_WIDGET_TEXTS: Record<string, string> = {
   heading: 'Tra cứu đơn hàng',
@@ -199,7 +199,6 @@ export class StoreService {
     ) {
       return false;
     }
-    if (String(store.plan || '').toLowerCase() === 'pro') return true;
     const expiresAt = store.expires_at ? Date.parse(store.expires_at) : NaN;
     return !(Number.isFinite(expiresAt) && expiresAt <= now);
   }

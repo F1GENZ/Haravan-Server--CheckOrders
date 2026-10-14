@@ -141,10 +141,25 @@ describe('StoreService.isEntitled', () => {
     ).toBe(true);
     expect(
       service.isEntitled(
-        { status: 'active', plan: 'Pro', expires_at: '2026-01-01T00:00:00Z' },
+        { status: 'active', plan: 'Pro', expires_at: '2027-10-13T00:00:00Z' },
         now,
       ),
     ).toBe(true);
+  });
+
+  it('blocks a paid plan once its paid period has ended', () => {
+    expect(
+      service.isEntitled(
+        { status: 'active', plan: 'Pro', expires_at: '2026-01-01T00:00:00Z' },
+        now,
+      ),
+    ).toBe(false);
+    expect(
+      service.isEntitled(
+        { status: 'lapsed', plan: 'Free', expires_at: '2026-10-12T00:00:00Z' },
+        now,
+      ),
+    ).toBe(false);
   });
 
   it('rejects stores whose app was uninstalled even if expiry is in the future', () => {

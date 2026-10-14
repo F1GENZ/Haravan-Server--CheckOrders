@@ -27,4 +27,16 @@ export class HaravanAPIService {
     }
     return response.data.shop;
   }
+
+  async getAppSubscriptions(token: string): Promise<RecordData[]> {
+    const response = await axios.get<{ app_subscriptions?: RecordData[] }>(
+      'https://apis.haravan.com/com/apps/app_subscriptions.json',
+      { headers: { Authorization: `Bearer ${token}` }, timeout: 10_000 },
+    );
+    const list = response.data?.app_subscriptions;
+    if (!Array.isArray(list)) {
+      throw new BadRequestException('Failed to fetch app subscriptions');
+    }
+    return list;
+  }
 }
