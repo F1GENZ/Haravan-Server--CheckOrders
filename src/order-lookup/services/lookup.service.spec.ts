@@ -487,4 +487,23 @@ describe('LookupService order normalization', () => {
       { variant_id: 11, quantity: 2, title: 'Áo' },
     ]);
   });
+
+  it('hides the Default Title placeholder of single-variant products like the admin does', async () => {
+    const result = await lookupWith(
+      {
+        order_number: 10001,
+        name: '#10001',
+        financial_status: 'paid',
+        line_items: [
+          { title: 'Lược', variant_title: 'Default Title', variant_id: 11, quantity: 1, price: '120000' },
+          { title: 'Dầu gội', variant_title: '10 oz', variant_id: 12, quantity: 1, price: '250000' },
+        ],
+      },
+      ['order_number', 'line_items'],
+    );
+
+    const items = result.line_items as Array<Record<string, unknown>>;
+    expect(items[0].variant_title).toBeUndefined();
+    expect(items[1].variant_title).toBe('10 oz');
+  });
 });

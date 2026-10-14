@@ -526,7 +526,10 @@ export class LookupService {
       const imageObj = item.image as Record<string, unknown> | undefined;
       return {
         title: str(item.title) || '',
-        variant_title: str(item.variant_title),
+        variant_title:
+          str(item.variant_title) === 'Default Title'
+            ? undefined
+            : str(item.variant_title),
         sku: str(item.sku),
         vendor: str(item.vendor),
         barcode: str(item.barcode),
