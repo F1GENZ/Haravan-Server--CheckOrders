@@ -122,6 +122,21 @@ describe('Order Lookup Contract Regression Suite', () => {
       expect(statusOnly.fulfillment_status_raw).toBe('fulfilled');
     });
 
+    it('keeps cancelled_at when only status is visible and drops it when neither status nor fulfillment_status is visible', () => {
+      const cancelled = {
+        ...sampleOrder,
+        cancelled_at: '2026-10-13T18:40:39Z',
+      };
+      expect(
+        maskingService.filterFields(cancelled, ['order_number', 'status'])
+          .cancelled_at,
+      ).toBe('2026-10-13T18:40:39Z');
+      expect(
+        maskingService.filterFields(cancelled, ['order_number'])
+          .cancelled_at,
+      ).toBeUndefined();
+    });
+
     it('shows customer name only when customer_name is in visible_fields', () => {
       const withName = maskingService.filterFields(sampleOrder, [
         'order_number',

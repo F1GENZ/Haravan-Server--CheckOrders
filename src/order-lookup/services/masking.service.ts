@@ -131,7 +131,13 @@ export class MaskingService {
     if (visibleFields.includes('fulfillment_status')) {
       if (order.fulfillment_status_raw)
         filtered.fulfillment_status_raw = order.fulfillment_status_raw;
-      if (order.cancelled_at) filtered.cancelled_at = order.cancelled_at;
+    }
+    if (
+      (visibleFields.includes('status') ||
+        visibleFields.includes('fulfillment_status')) &&
+      order.cancelled_at
+    ) {
+      filtered.cancelled_at = order.cancelled_at;
     }
     if (visibleFields.includes('tracking_info') && order.tracking) {
       filtered.tracking = order.tracking;

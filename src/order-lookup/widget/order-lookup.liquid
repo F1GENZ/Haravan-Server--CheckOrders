@@ -1768,13 +1768,15 @@
       if (has('order_number') || has('status')) {
         h += '<div class="f1g-ot__card-head">';
         if (has('order_number')) h += '<span class="f1g-ot__order-num">' + esc(o.order_number) + '</span>';
-        if (has('status'))
+        if (has('status')) {
+          var cancelledOrder = isOrderCancelled(o);
           h +=
             '<span class="f1g-ot__badge f1g-ot__badge--' +
-            esc(o.status_class || 'pending') +
+            (cancelledOrder ? 'cancelled' : esc(o.status_class || 'pending')) +
             '">' +
-            esc(translateStatus(o.financial_status, o.status_text)) +
+            esc(cancelledOrder ? T.status_voided : translateStatus(o.financial_status, o.status_text)) +
             '</span>';
+        }
         h += '</div>';
       }
       h += '<div class="f1g-ot__card-body">';
@@ -1902,6 +1904,15 @@
       return h;
     }
 
+    function isOrderCancelled(o) {
+      var fs = String(o.fulfillment_status_raw || o.fulfillment_status || '').toLowerCase();
+      return (
+        Boolean(o.cancelled_at) ||
+        ['cancelled', 'canceled', 'restocked', 'voided'].indexOf(fs) >= 0 ||
+        String(o.status_class || '').toLowerCase() === 'cancelled'
+      );
+    }
+
     function renderTimeline(o) {
       var steps = [
         {
@@ -1918,9 +1929,7 @@
       var fs = String(o.fulfillment_status_raw || o.fulfillment_status || '').toLowerCase();
       var ps = String(o.status_class || '').toLowerCase();
       var activeIdx = 0;
-      var cancelled = Boolean(o.cancelled_at) ||
-        ['cancelled', 'canceled', 'restocked', 'voided'].indexOf(fs) >= 0 ||
-        ps === 'cancelled';
+      var cancelled = isOrderCancelled(o);
       if (cancelled) {
         // Cancelled: stop at step 1 (Xác nhận) with a special visual — bar stays at 0
         activeIdx = 0;
