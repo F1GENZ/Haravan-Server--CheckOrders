@@ -1908,8 +1908,7 @@
       var fs = String(o.fulfillment_status_raw || o.fulfillment_status || '').toLowerCase();
       return (
         Boolean(o.cancelled_at) ||
-        ['cancelled', 'canceled', 'restocked', 'voided'].indexOf(fs) >= 0 ||
-        String(o.status_class || '').toLowerCase() === 'cancelled'
+        ['cancelled', 'canceled', 'restocked', 'voided'].indexOf(fs) >= 0
       );
     }
 
