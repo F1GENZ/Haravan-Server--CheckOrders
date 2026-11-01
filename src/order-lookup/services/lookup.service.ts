@@ -166,7 +166,7 @@ export class LookupService {
       store.org_id,
     );
     if (rateResult.blocked) {
-      await this.logLookup(
+      void this.logLookup(
         store.org_id,
         clientIp,
         normalizedPhone,
@@ -184,7 +184,7 @@ export class LookupService {
     if (rateResult.require_captcha && this.isCaptchaConfigured()) {
       const captchaValid = await this.verifyCaptcha(captchaToken, clientIp);
       if (!captchaValid) {
-        await this.logLookup(
+        void this.logLookup(
           store.org_id,
           clientIp,
           normalizedPhone,
@@ -227,7 +227,7 @@ export class LookupService {
       );
 
       if (!orders || orders.length === 0) {
-        await this.logLookup(
+        void this.logLookup(
           store.org_id,
           clientIp,
           normalizedPhone,
@@ -271,7 +271,7 @@ export class LookupService {
       });
 
       // 7. Log successful lookup
-      await this.logLookup(
+      void this.logLookup(
         store.org_id,
         clientIp,
         normalizedPhone,
@@ -296,7 +296,7 @@ export class LookupService {
         };
       }
 
-      await this.logLookup(
+      void this.logLookup(
         store.org_id,
         clientIp,
         normalizedPhone,

@@ -110,7 +110,7 @@ export class HaravanOrderService {
       )}:max${maxOrders}`;
       const cached = await this.redis.get<CachedLookup>(cacheKey);
       if (!Array.isArray(cached) && cached?.not_found) {
-        await this.saveTelemetry(storeId, {
+        void this.saveTelemetry(storeId, {
           cache_status: 'negative_hit',
           result_count: 0,
           pages_scanned: 0,
@@ -120,7 +120,7 @@ export class HaravanOrderService {
         return [];
       }
       if (!Array.isArray(cached) && Array.isArray(cached?.orders)) {
-        await this.saveTelemetry(storeId, {
+        void this.saveTelemetry(storeId, {
           cache_status: 'hit',
           result_count: cached.orders.length,
           pages_scanned: 0,
@@ -191,7 +191,7 @@ export class HaravanOrderService {
       this.logger.debug(
         `DB index hit for store ${storeId} (${orders.length} orders)`,
       );
-      await this.saveTelemetry(storeId, {
+      void this.saveTelemetry(storeId, {
         cache_status: 'db_hit',
         result_count: orders.length,
         pages_scanned: 0,
@@ -219,7 +219,7 @@ export class HaravanOrderService {
       this.logger.debug(
         `Cache hit for store ${storeId} (${cached.length} orders)`,
       );
-      await this.saveTelemetry(storeId, {
+      void this.saveTelemetry(storeId, {
         cache_status: 'hit',
         result_count: cached.length,
         pages_scanned: 0,
@@ -229,7 +229,7 @@ export class HaravanOrderService {
       return cached.slice(0, maxOrders);
     }
     if (!Array.isArray(cached) && cached?.not_found) {
-      await this.saveTelemetry(storeId, {
+      void this.saveTelemetry(storeId, {
         cache_status: 'negative_hit',
         result_count: 0,
         pages_scanned: 0,
@@ -239,7 +239,7 @@ export class HaravanOrderService {
       return [];
     }
     if (!Array.isArray(cached) && Array.isArray(cached?.orders)) {
-      await this.saveTelemetry(storeId, {
+      void this.saveTelemetry(storeId, {
         cache_status: 'hit',
         result_count: cached.orders.length,
         pages_scanned: 0,
@@ -327,7 +327,7 @@ export class HaravanOrderService {
       );
     }
 
-    await this.saveTelemetry(storeId, {
+    void this.saveTelemetry(storeId, {
       cache_status: 'miss',
       result_count: filtered.length,
       pages_scanned: pagesScanned,

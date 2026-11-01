@@ -32,7 +32,11 @@ export class NotificationService {
     const dedupeKey = `${event}:${JSON.stringify(redacted)}`;
     const last = this.lastSent.get(dedupeKey) || 0;
     if (Date.now() - last < dedupeSeconds * 1000) return;
-    this.lastSent.set(dedupeKey, Date.now());
+    const now = Date.now();
+    for (const [key, sentAt] of this.lastSent) {
+      if (now - sentAt >= dedupeSeconds * 1000) this.lastSent.delete(key);
+    }
+    this.lastSent.set(dedupeKey, now);
 
     const appName =
       this.config.get<string>('TELEGRAM_APP_NAME') || 'F1GENZ CheckOrders';

@@ -49,9 +49,23 @@ const normalizeIp = (value: string | null | undefined): string | null => {
   return first.replace(/^::ffff:/, '');
 };
 
+/**
+ * `TRUST_PROXY` is empty in production (cloudflared in front, no `X-Forwarded-For` hop to trust), so `req.ip` is
+ * the tunnel's loopback address for every shopper and they share one rate-limit bucket. `CF-Connecting-IP`
+ * is only trusted when the operator sets `TRUST_CF_CONNECTING_IP=true`, which is correct only when the
+ * origin is reachable through the tunnel alone.
+ */
 const getClientIp = (req: Request): string => {
+  const trustCloudflare =
+    String(process.env.TRUST_CF_CONNECTING_IP || '').toLowerCase() === 'true';
+  const cloudflareIp = trustCloudflare
+    ? normalizeIp(firstHeaderValue(req.headers['cf-connecting-ip']))
+    : null;
   return (
-    normalizeIp(req.ip) || normalizeIp(req.socket.remoteAddress) || 'unknown'
+    cloudflareIp ||
+    normalizeIp(req.ip) ||
+    normalizeIp(req.socket.remoteAddress) ||
+    'unknown'
   );
 };
 

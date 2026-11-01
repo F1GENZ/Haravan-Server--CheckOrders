@@ -37,14 +37,29 @@ export class TelegramExceptionFilter implements ExceptionFilter {
     private readonly configService: ConfigService,
   ) {}
 
+  /**
+   * Nest maps only `HttpException`, `SyntaxError` and `URIError` itself. body-parser throws `http-errors` objects
+   * (413 `request entity too large`, 415, 400 on a bad charset) that are plain `Error`s carrying a 4xx
+   * `status`; without this they answer 500 and page Telegram for a client mistake.
+   */
+  private statusOf(exception: unknown): number {
+    if (exception instanceof HttpException) return exception.getStatus();
+    if (exception instanceof Error && Reflect.get(exception, 'expose') === true) {
+      for (const key of ['status', 'statusCode']) {
+        const candidate: unknown = Reflect.get(exception, key);
+        if (typeof candidate === 'number' && Number.isInteger(candidate) && candidate >= 400 && candidate < 500) {
+          return candidate;
+        }
+      }
+    }
+    return HttpStatus.INTERNAL_SERVER_ERROR;
+  }
+
   catch(exception: unknown, host: ArgumentsHost): void {
     const ctx = host.switchToHttp();
     const req = ctx.getRequest<Request & { orgid?: string }>();
     const res = ctx.getResponse<Response>();
-    const status =
-      exception instanceof HttpException
-        ? exception.getStatus()
-        : HttpStatus.INTERNAL_SERVER_ERROR;
+    const status = this.statusOf(exception);
     const notify4xx =
       String(
         this.configService.get<string>('TELEGRAM_NOTIFY_HTTP_4XX') || '',
