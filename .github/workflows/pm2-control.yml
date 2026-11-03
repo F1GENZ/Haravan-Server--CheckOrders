@@ -1,0 +1,39 @@
+name: PM2 control (checkorders)
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: status, stop (then save) or start (then save)
+        required: true
+        type: choice
+        options: [status, stop, start]
+
+concurrency:
+  group: production-vps
+  cancel-in-progress: false
+
+jobs:
+  pm2:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: webfactory/ssh-agent@v0.7.0
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+      - name: Run
+        env:
+          VPS_TARGET: ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}
+          ACTION: ${{ inputs.action }}
+        run: |
+          set -euo pipefail
+          ssh -o StrictHostKeyChecking=no "$VPS_TARGET" "bash -s" "$ACTION" <<'SCRIPT'
+          set -euo pipefail
+          case "$1" in
+            stop) pm2 stop haravan-checkorders >/dev/null && pm2 save >/dev/null ;;
+            start) pm2 start haravan-checkorders >/dev/null && pm2 save >/dev/null ;;
+            status) ;;
+          esac
+          pm2 jlist | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{for(const p of JSON.parse(s)){if(p.name==="haravan-checkorders")console.log("pm2 status=" + p.pm2_env.status + " restarts=" + p.pm2_env.restart_time)}})'
+          node -e 'const d=JSON.parse(require("fs").readFileSync(process.env.HOME+"/.pm2/dump.pm2","utf8"));for(const p of d){if(p.name==="haravan-checkorders")console.log("dump status=" + p.status)}'
+          SCRIPT
