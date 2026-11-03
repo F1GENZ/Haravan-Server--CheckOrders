@@ -223,6 +223,9 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
         '',
     ).trim();
     if (!raw) {
+      if (this.isProduction()) {
+        throw new Error('LOOKUP_HASH_SECRET is required');
+      }
       return crypto
         .createHash('sha256')
         .update('checkorder-hash-default')
@@ -245,14 +248,28 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
   private hash(value: unknown): string | null {
     const raw = stringValue(value).toLowerCase();
     if (!raw) return null;
+    const lookupSecret = String(
+      this.config.get<string>('LOOKUP_HASH_SECRET') || '',
+    ).trim();
+    if (this.isProduction()) {
+      // Production never falls back to other secrets or an unkeyed digest.
+      if (!lookupSecret) return null;
+      return crypto.createHmac('sha256', lookupSecret).update(raw).digest('hex');
+    }
     const secret =
-      String(this.config.get<string>('LOOKUP_HASH_SECRET') || '').trim() ||
+      lookupSecret ||
       String(this.config.get<string>('APP_SESSION_SECRET') || '').trim() ||
       String(this.config.get<string>('HRV_CLIENT_SECRET') || '').trim();
-    const hmac = secret
+    return secret
       ? crypto.createHmac('sha256', secret).update(raw).digest('hex')
       : crypto.createHash('sha256').update(raw).digest('hex');
-    return hmac;
+  }
+
+  private isProduction(): boolean {
+    return (
+      String(this.config.get<string>('NODE_ENV') || '').toLowerCase() ===
+      'production'
+    );
   }
 
   private getErrorMessage(error: unknown): string {
@@ -826,7 +843,8 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
           orgid: input.orgid || '',
           topic: input.topic,
           payloadHash,
-          payload: this.toOptionalJson(input.payload),
+          // The body carries customer PII; only its hash is audited. Omit the
+          // key: an explicit null is rejected by the nullable Json column.
           headers: this.toOptionalJson(input.headers),
           status: input.status,
           attempts: input.status === 'processed' ? 1 : 0,

@@ -10,6 +10,7 @@ import { Reflector } from '@nestjs/core';
 import type { Request } from 'express';
 import { HaravanService } from '../../haravan/haravan.service';
 import { ALLOW_EXPIRED_HARAVAN_TOKEN } from '../decorators/shop-auth.decorator';
+import { resolveTrustedForwardedHost } from '../trusted-hosts';
 
 type ShopRequest = Request<
   Record<string, string>,
@@ -98,7 +99,7 @@ export class ShopAuthGuard implements CanActivate {
   private getAllowedAdminHosts(req: ShopRequest): Set<string> {
     const hosts = [
       toStringValue(req.headers.host),
-      toStringValue(req.headers['x-forwarded-host']),
+      resolveTrustedForwardedHost(req.headers),
       this.getHostFromUrl(process.env.FRONTEND_URL || null),
     ]
       .filter((value): value is string => Boolean(value))
@@ -136,6 +137,7 @@ export class ShopAuthGuard implements CanActivate {
     if (!ORGID_REGEX.test(session.orgid)) {
       throw new BadRequestException('Invalid orgid');
     }
+    await this.haravanService.assertSessionNotRevoked(session);
 
     let accessToken = '';
     try {

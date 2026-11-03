@@ -21,6 +21,7 @@ import { StoreService } from '../services/store.service';
 import type { StoreRecord } from '../services/store.service';
 import { LookupRequestDto } from '../dto/lookup-request.dto';
 import type { LookupResponseDto } from '../dto/lookup-response.dto';
+import { resolveTrustedForwardedHost } from '../../common/trusted-hosts';
 
 const widgetApiUrl = (): string =>
   (process.env.WIDGET_API_URL || '').replace(/\/+$/, '');
@@ -71,7 +72,7 @@ const getClientIp = (req: Request): string => {
 
 const getForwardedHost = (req: Request): string | undefined => {
   return (
-    firstHeaderValue(req.headers['x-forwarded-host']) ||
+    resolveTrustedForwardedHost(req.headers) ||
     firstHeaderValue(req.headers.host) ||
     undefined
   );

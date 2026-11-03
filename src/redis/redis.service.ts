@@ -1,12 +1,48 @@
-import { Inject, Injectable, OnModuleDestroy } from '@nestjs/common';
+import {
+  Inject,
+  Injectable,
+  Logger,
+  OnModuleDestroy,
+  Optional,
+} from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import Redis from 'ioredis';
+import {
+  isSealed,
+  open,
+  resolveEnvelopeKey,
+  seal,
+} from '../common/secret-envelope';
+
+/**
+ * Writer switch for Haravan token sealing. The reader accepts both plaintext
+ * and sealed records regardless; the writer is enabled only after the reader
+ * is live everywhere, so a rollback never meets ciphertext it cannot read.
+ */
+export const SEAL_REDIS_TOKENS_ON_WRITE = false;
+
+const TOKEN_FIELDS = ['access_token', 'refresh_token'] as const;
+
+const isPlainObject = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
 
 @Injectable()
 export class RedisService implements OnModuleDestroy {
-  constructor(@Inject('REDIS_CLIENT') private readonly client: Redis) {}
+  private readonly logger = new Logger(RedisService.name);
+  private readonly tokenKey: Buffer | null;
+  protected sealOnWrite: boolean = SEAL_REDIS_TOKENS_ON_WRITE;
+
+  constructor(
+    @Inject('REDIS_CLIENT') private readonly client: Redis,
+    @Optional() config?: ConfigService,
+  ) {
+    this.tokenKey = resolveEnvelopeKey(
+      config?.get<string>('DATA_ENCRYPTION_KEY'),
+    );
+  }
 
   async set(key: string, value: unknown, ttl?: number) {
-    const val = JSON.stringify(value);
+    const val = JSON.stringify(this.sealTokenFields(value));
     if (ttl) {
       await this.client.set(key, val, 'EX', ttl);
     } else {
@@ -17,11 +53,52 @@ export class RedisService implements OnModuleDestroy {
   async get<T = unknown>(key: string): Promise<T | null> {
     const val = await this.client.get(key);
     if (!val) return null;
+    let parsed: unknown;
     try {
-      return JSON.parse(val) as T;
+      parsed = JSON.parse(val);
     } catch {
       return null;
     }
+    return this.openTokenFields(key, parsed) as T | null;
+  }
+
+  /** Writes plaintext when no key is configured; never mutates the caller's object. */
+  private sealTokenFields(value: unknown): unknown {
+    if (!this.sealOnWrite || !this.tokenKey || !isPlainObject(value)) {
+      return value;
+    }
+    const copy: Record<string, unknown> = { ...value };
+    for (const field of TOKEN_FIELDS) {
+      const token = copy[field];
+      if (typeof token === 'string' && token && !isSealed(token)) {
+        copy[field] = seal(this.tokenKey, token);
+      }
+    }
+    return copy;
+  }
+
+  /**
+   * Plaintext fields pass through (records written before sealing). A sealed
+   * field that cannot be opened makes the whole record a miss: callers fall
+   * back to the database instead of using an empty or ciphertext token.
+   */
+  private openTokenFields(key: string, value: unknown): unknown {
+    if (!isPlainObject(value)) return value;
+    let copy: Record<string, unknown> | null = null;
+    for (const field of TOKEN_FIELDS) {
+      const token = value[field];
+      if (!isSealed(token)) continue;
+      const plain = open(this.tokenKey, token);
+      if (plain === null) {
+        this.logger.warn(
+          `Failed to decrypt redis token field ${field} for key ${key}`,
+        );
+        return null;
+      }
+      copy ??= { ...value };
+      copy[field] = plain;
+    }
+    return copy ?? value;
   }
 
   /**

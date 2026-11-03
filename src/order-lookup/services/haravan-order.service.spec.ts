@@ -26,6 +26,10 @@ class RedisMock {
   del(key: string) {
     return this.store.delete(key) ? 1 : 0;
   }
+
+  incr(_key?: string, _ttlSeconds?: number): number {
+    return 1;
+  }
 }
 
 const config = {
@@ -276,14 +280,14 @@ describe('HaravanOrderService lookup filtering', () => {
 
   it('does not poison negative cache when a concurrent deep fallback lock is held', async () => {
     const redis = new RedisMock();
-    const queryHash = crypto
-      .createHash('sha256')
-      .update('0901234567:10001')
-      .digest('hex')
-      .slice(0, 16);
-    const lockKey = `haravan:checkorders:fallback_lock:haravan:checkorders:cache:store-locked:${queryHash}`;
-    redis.set(lockKey, '1');
     const service = new HaravanOrderService(config, redis as never);
+    const cacheKey = (
+      service as unknown as {
+        buildCacheKey(store: string, phone: string, code: string): string;
+      }
+    ).buildCacheKey('store-locked', '0901234567', '10001');
+    const lockKey = `haravan:checkorders:fallback_lock:${cacheKey}`;
+    redis.set(lockKey, '1');
 
     mockedAxios.get.mockResolvedValueOnce({
       data: { orders: [] },
@@ -509,5 +513,229 @@ describe('HaravanOrderService DB order index integration', () => {
       'store_ready',
       expect.objectContaining({ id: 9001 }),
     );
+  });
+});
+
+describe('HaravanOrderService sealed cache and fallback budget', () => {
+  const DATA_KEY =
+    '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
+
+  const makeConfig = (extra: Record<string, string> = {}): ConfigService =>
+    ({
+      get: jest.fn((key: string) => {
+        const values: Record<string, string> = {
+          ORDER_LOOKUP_LOOKBACK_DAYS: '365',
+          ORDER_LOOKUP_MAX_PAGES: '1',
+          ...extra,
+        };
+        return values[key];
+      }),
+    }) as unknown as ConfigService;
+
+  const keyedConfig = (extra: Record<string, string> = {}) =>
+    makeConfig({
+      DATA_ENCRYPTION_KEY: DATA_KEY,
+      LOOKUP_HASH_SECRET: 'lookup-hash-secret',
+      ...extra,
+    });
+
+  class CountingRedis extends RedisMock {
+    readonly entries = new Map<string, unknown>();
+    private readonly counters = new Map<string, number>();
+    override get<T = unknown>(key: string): T | null {
+      return (this.entries.get(key) as T | undefined) ?? super.get<T>(key);
+    }
+    override set(key: string, value: unknown) {
+      this.entries.set(key, value);
+    }
+    incr(key: string): number {
+      const next = (this.counters.get(key) || 0) + 1;
+      this.counters.set(key, next);
+      return next;
+    }
+  }
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockedAxios.get.mockReset();
+  });
+
+  const order = {
+    id: 11,
+    name: '#10001',
+    order_number: 10001,
+    phone: '0901234567',
+  };
+
+  it('stores cached lookups sealed and reads them back', async () => {
+    const redis = new CountingRedis();
+    const service = new HaravanOrderService(keyedConfig(), redis as never);
+    mockedAxios.get.mockResolvedValueOnce({ data: { orders: [order] } });
+
+    const first = await service.lookupOrders('t', 'store-1', '0901234567', '', 5);
+    const second = await service.lookupOrders('t', 'store-1', '0901234567', '', 5);
+
+    expect(first).toHaveLength(1);
+    expect(second.map((o) => o.id)).toEqual([11]);
+    expect(mockedAxios.get).toHaveBeenCalledTimes(1);
+    const cached = [...redis.entries.entries()].filter(([key]) =>
+      key.startsWith('haravan:checkorders:cache:store-1:'),
+    );
+    expect(cached).toHaveLength(1);
+    expect(typeof cached[0][1]).toBe('string');
+    expect(String(cached[0][1]).startsWith('enc:v1:')).toBe(true);
+    expect(String(cached[0][1])).not.toContain('0901234567');
+    expect(String(cached[0][1])).not.toContain('#10001');
+  });
+
+  it('treats a sealed entry it cannot open as a cache miss', async () => {
+    const redis = new CountingRedis();
+    const service = new HaravanOrderService(keyedConfig(), redis as never);
+    const cacheKey = (
+      service as unknown as {
+        buildCacheKey(store: string, phone: string, code: string): string;
+      }
+    ).buildCacheKey('store-1', '0901234567', '');
+    redis.set(cacheKey, 'enc:v1:AAAA.BBBB.CCCC');
+    mockedAxios.get.mockResolvedValueOnce({ data: { orders: [order] } });
+
+    const result = await service.lookupOrders('t', 'store-1', '0901234567', '', 5);
+
+    expect(result.map((o) => o.id)).toEqual([11]);
+    expect(mockedAxios.get).toHaveBeenCalledTimes(1);
+  });
+
+  it('still reads an unsealed legacy entry', async () => {
+    const redis = new CountingRedis();
+    const service = new HaravanOrderService(keyedConfig(), redis as never);
+    const cacheKey = (
+      service as unknown as {
+        buildCacheKey(store: string, phone: string, code: string): string;
+      }
+    ).buildCacheKey('store-1', '0901234567', '');
+    redis.set(cacheKey, { orders: [order] });
+
+    const result = await service.lookupOrders('t', 'store-1', '0901234567', '', 5);
+
+    expect(result.map((o) => o.id)).toEqual([11]);
+    expect(mockedAxios.get).not.toHaveBeenCalled();
+  });
+
+  it('derives the cache key with a keyed HMAC under the store prefix', () => {
+    const service = new HaravanOrderService(keyedConfig(), new CountingRedis() as never);
+    const build = (
+      service as unknown as {
+        buildCacheKey(store: string, phone: string, code: string): string;
+      }
+    ).buildCacheKey.bind(service);
+    const key = build('store-1', '0901234567', '10001');
+    const unkeyed = crypto
+      .createHash('sha256')
+      .update('0901234567:10001')
+      .digest('hex')
+      .slice(0, 16);
+
+    expect(key).toMatch(/^haravan:checkorders:cache:store-1:[a-f0-9]{16}$/);
+    expect(key.endsWith(unkeyed)).toBe(false);
+    expect(build('store-1', '0901234567', '10001')).toBe(key);
+    const otherSecret = new HaravanOrderService(
+      keyedConfig({ LOOKUP_HASH_SECRET: 'a-different-secret' }),
+      new CountingRedis() as never,
+    );
+    expect(
+      (
+        otherSecret as unknown as {
+          buildCacheKey(store: string, phone: string, code: string): string;
+        }
+      ).buildCacheKey('store-1', '0901234567', '10001'),
+    ).not.toBe(key);
+  });
+
+  it('refuses to derive a cache key in production without a secret', () => {
+    const service = new HaravanOrderService(
+      makeConfig({ NODE_ENV: 'production' }),
+      new CountingRedis() as never,
+    );
+    expect(() =>
+      (
+        service as unknown as {
+          buildCacheKey(store: string, phone: string, code: string): string;
+        }
+      ).buildCacheKey('store-1', '0901234567', ''),
+    ).toThrow('LOOKUP_HASH_SECRET is required');
+  });
+
+  it('stops running deep scans for a store over its per-minute budget and does not cache the skip', async () => {
+    const redis = new CountingRedis();
+    const service = new HaravanOrderService(
+      makeConfig({ ORDER_LOOKUP_FALLBACK_PER_MIN: '1' }),
+      redis as never,
+    );
+    mockedAxios.get.mockResolvedValue({ data: { orders: [] } });
+
+    await service.lookupOrders('t', 'store-1', '0901111111', '', 5);
+    expect(mockedAxios.get).toHaveBeenCalledTimes(2);
+
+    mockedAxios.get.mockClear();
+    const capped = await service.lookupOrders('t', 'store-1', '0902222222', '', 5);
+
+    expect(capped).toEqual([]);
+    expect(mockedAxios.get).toHaveBeenCalledTimes(1);
+    const cacheKey = (
+      service as unknown as {
+        buildCacheKey(store: string, phone: string, code: string): string;
+      }
+    ).buildCacheKey('store-1', '0902222222', '');
+    expect(redis.get(cacheKey)).toBeNull();
+    expect(
+      redis.get(`haravan:checkorders:fallback_lock:${cacheKey}`),
+    ).toBeNull();
+  });
+
+  it('budgets each store separately', async () => {
+    const redis = new CountingRedis();
+    const service = new HaravanOrderService(
+      makeConfig({ ORDER_LOOKUP_FALLBACK_PER_MIN: '1' }),
+      redis as never,
+    );
+    mockedAxios.get.mockResolvedValue({ data: { orders: [] } });
+
+    await service.lookupOrders('t', 'store-1', '0901111111', '', 5);
+    mockedAxios.get.mockClear();
+    await service.lookupOrders('t', 'store-2', '0901111111', '', 5);
+
+    expect(mockedAxios.get).toHaveBeenCalledTimes(2);
+  });
+
+  it('refuses to write a plaintext cache entry in production without an encryption key', async () => {
+    const redis = new CountingRedis();
+    const service = new HaravanOrderService(
+      makeConfig({ NODE_ENV: 'production', LOOKUP_HASH_SECRET: 'lookup-secret' }),
+      redis as never,
+    );
+    mockedAxios.get.mockResolvedValueOnce({ data: { orders: [order] } });
+
+    await expect(
+      service.lookupOrders('t', 'store-1', '0901234567', '', 5),
+    ).rejects.toThrow('DATA_ENCRYPTION_KEY is required');
+    expect(
+      [...redis.entries.keys()].filter((key) => key.includes(':cache:')),
+    ).toEqual([]);
+  });
+
+  it('seals normally in production when the key is configured', async () => {
+    const redis = new CountingRedis();
+    const service = new HaravanOrderService(
+      keyedConfig({ NODE_ENV: 'production' }),
+      redis as never,
+    );
+    mockedAxios.get.mockResolvedValueOnce({ data: { orders: [order] } });
+
+    await service.lookupOrders('t', 'store-1', '0901234567', '', 5);
+
+    const cached = [...redis.entries.entries()].find(([key]) =>
+      key.includes(':cache:'),
+    );
+    expect(String(cached?.[1]).startsWith('enc:v1:')).toBe(true);
   });
 });

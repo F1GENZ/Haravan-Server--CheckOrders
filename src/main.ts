@@ -9,6 +9,7 @@ import express, {
 import { AppModule } from './app.module';
 import { NotificationService } from './notification/notification.service';
 import { TelegramExceptionFilter } from './notification/telegram-exception.filter';
+import { createCorsPolicy } from './common/cors-policy';
 
 type RawBodyRequest = Request & { rawBody?: Buffer; rawBodyText?: string };
 
@@ -21,12 +22,6 @@ const captureRawBody = (
   req.rawBody = Buffer.from(buf);
   req.rawBodyText = buf.toString('utf8');
 };
-
-const parseOrigins = (value?: string): string[] =>
-  String(value || '')
-    .split(',')
-    .map((origin) => origin.trim())
-    .filter(Boolean);
 
 const parseTrustProxy = (value?: string): boolean | number | string => {
   const raw = String(value || '').trim();
@@ -136,64 +131,14 @@ async function bootstrap() {
     }),
   );
 
-  const allowedOrigins = [
-    'capacitor://localhost',
-    'ionic://localhost',
-    'http://localhost',
-    'http://127.0.0.1',
-    'http://localhost:5173',
-    'http://localhost:3000',
-    'http://127.0.0.1:5173',
-    'http://127.0.0.1:3000',
-    process.env.FRONTEND_URL,
-    process.env.API_BASE_URL,
-    process.env.WIDGET_PUBLIC_URL,
-    process.env.WIDGET_API_URL,
-    ...parseOrigins(process.env.CORS_ALLOWED_ORIGINS),
-  ].filter((origin): origin is string => Boolean(origin));
-
-  const isAllowedOrigin = (origin: string): boolean => {
-    if (allowedOrigins.includes(origin)) return true;
-    try {
-      const { hostname } = new URL(origin);
-      if (
-        process.env.NODE_ENV !== 'production' &&
-        (hostname === 'localhost' || hostname === '127.0.0.1')
-      ) {
-        return true;
-      }
-      // App surfaces
-      if (hostname === 'f1genz.com' || hostname.endsWith('.f1genz.com')) {
-        return true;
-      }
-      // Haravan storefronts (widget may also call API with shop Origin)
-      if (
-        hostname === 'myharavan.com' ||
-        hostname.endsWith('.myharavan.com')
-      ) {
-        return true;
-      }
-      return false;
-    } catch {
-      return false;
-    }
-  };
-
-  // Public widget/lookup paths use OrderLookupCorsMiddleware for custom domains.
-  // Global OPTIONS must not 403 those routes before the dynamic middleware runs.
-  const isDynamicCorsPath = (reqPath: string): boolean => {
-    const path = String(reqPath || '');
-    return (
-      path === '/api/order/lookup' ||
-      path.startsWith('/api/order/lookup?') ||
-      path === '/api/order/widget' ||
-      path.startsWith('/api/order/widget/')
-    );
-  };
+  const corsPolicy = createCorsPolicy(process.env);
 
   app.use((req: Request, res: Response, next: NextFunction) => {
     const origin = req.headers.origin;
-    if (typeof origin === 'string' && isAllowedOrigin(origin)) {
+    const allowed =
+      typeof origin === 'string' &&
+      corsPolicy.isAllowedOrigin(origin, req.path);
+    if (typeof origin === 'string' && allowed) {
       res.setHeader('Access-Control-Allow-Origin', origin);
       res.setHeader('Access-Control-Allow-Credentials', 'true');
       res.setHeader('Access-Control-Allow-Methods', CORS_METHODS);
@@ -201,17 +146,20 @@ async function bootstrap() {
       res.setHeader('Access-Control-Expose-Headers', 'Content-Length');
       res.setHeader('Access-Control-Max-Age', '86400');
       res.setHeader('Vary', 'Origin');
-    } else if (typeof origin === 'string' && !isDynamicCorsPath(req.path)) {
+    } else if (
+      typeof origin === 'string' &&
+      !corsPolicy.isDynamicCorsPath(req.path)
+    ) {
       logger.warn(`Blocked CORS origin: ${origin}`);
     }
 
     if (req.method === 'OPTIONS') {
-      if (typeof origin === 'string' && isAllowedOrigin(origin)) {
+      if (allowed) {
         res.status(204).end();
         return;
       }
       // Defer storefront custom-domain preflight to OrderLookupCorsMiddleware
-      if (isDynamicCorsPath(req.path)) {
+      if (corsPolicy.isDynamicCorsPath(req.path)) {
         return next();
       }
       res.status(403).end();

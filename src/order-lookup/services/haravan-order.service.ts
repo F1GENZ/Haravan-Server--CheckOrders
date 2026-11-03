@@ -5,6 +5,7 @@ import axios, { AxiosError } from 'axios';
 import * as crypto from 'crypto';
 import { normalizeLookupPhone } from '../utils/phone.util';
 import { OrderIndexService } from './order-index.service';
+import { isSealed, open, resolveEnvelopeKey, seal } from '../../common/secret-envelope';
 
 // ─── Types ───
 
@@ -53,6 +54,7 @@ const DEFAULT_FALLBACK_LOOKBACK_DAYS = 3650;
 const DEFAULT_FALLBACK_MAX_PAGES = 80;
 const DEFAULT_CACHE_SECONDS = 180;
 const DEFAULT_NEGATIVE_CACHE_SECONDS = 45;
+const DEFAULT_FALLBACK_PER_MIN = 20;
 const TELEMETRY_PREFIX = 'haravan:checkorders:telemetry';
 
 type CachedLookup =
@@ -77,6 +79,9 @@ type FetchOrdersResult = {
 @Injectable()
 export class HaravanOrderService {
   private readonly logger = new Logger(HaravanOrderService.name);
+
+  private cacheHashKey: Buffer | null = null;
+  private cacheSealKey: Buffer | null | undefined;
 
   constructor(
     private readonly configService: ConfigService,
@@ -108,7 +113,7 @@ export class HaravanOrderService {
         normalizedPhone,
         normalizedCode,
       )}:max${maxOrders}`;
-      const cached = await this.redis.get<CachedLookup>(cacheKey);
+      const cached = this.openCache(await this.redis.get<unknown>(cacheKey));
       if (!Array.isArray(cached) && cached?.not_found) {
         void this.saveTelemetry(storeId, {
           cache_status: 'negative_hit',
@@ -164,7 +169,7 @@ export class HaravanOrderService {
           } else {
             await this.redis.set(
               cacheKey,
-              { not_found: true },
+              this.sealCache({ not_found: true }),
               this.getPositiveConfig(
                 'ORDER_LOOKUP_NEGATIVE_CACHE_SECONDS',
                 DEFAULT_NEGATIVE_CACHE_SECONDS,
@@ -181,7 +186,7 @@ export class HaravanOrderService {
       if (orders.length > 0) {
         await this.redis.set(
           cacheKey,
-          { orders },
+          this.sealCache({ orders }),
           this.getPositiveConfig(
             'ORDER_LOOKUP_CACHE_SECONDS',
             DEFAULT_CACHE_SECONDS,
@@ -213,7 +218,7 @@ export class HaravanOrderService {
       normalizedPhone,
       normalizedCode,
     );
-    const cached = await this.redis.get<CachedLookup>(cacheKey);
+    const cached = this.openCache(await this.redis.get<unknown>(cacheKey));
 
     if (Array.isArray(cached) && cached.length > 0) {
       this.logger.debug(
@@ -274,6 +279,11 @@ export class HaravanOrderService {
           : true;
       if (!canRunDeepFallback) {
         fallbackSkipped = true;
+      } else if (await this.isFallbackBudgetExceeded(storeId)) {
+        if (typeof this.redis.del === 'function') {
+          await this.redis.del(fallbackLockKey);
+        }
+        fallbackSkipped = true;
       } else {
         try {
           fallbackUsed = true;
@@ -310,7 +320,7 @@ export class HaravanOrderService {
     if (filtered.length > 0) {
       await this.redis.set(
         cacheKey,
-        { orders: filtered },
+        this.sealCache({ orders: filtered }),
         this.getPositiveConfig(
           'ORDER_LOOKUP_CACHE_SECONDS',
           DEFAULT_CACHE_SECONDS,
@@ -319,7 +329,7 @@ export class HaravanOrderService {
     } else if (!fallbackSkipped) {
       await this.redis.set(
         cacheKey,
-        { not_found: true },
+        this.sealCache({ not_found: true }),
         this.getPositiveConfig(
           'ORDER_LOOKUP_NEGATIVE_CACHE_SECONDS',
           DEFAULT_NEGATIVE_CACHE_SECONDS,
@@ -395,11 +405,84 @@ export class HaravanOrderService {
   ): string {
     const raw = `${phone}:${orderCode}`.toLowerCase();
     const hash = crypto
-      .createHash('sha256')
+      .createHmac('sha256', this.getCacheHashKey())
       .update(raw)
       .digest('hex')
       .slice(0, 16);
     return `${CACHE_PREFIX}:${storeId}:${hash}`;
+  }
+
+  /**
+   * Keyed so the phone/order-code digest cannot be brute-forced from a Redis
+   * dump. Production has no fallback secret; development uses a fixed string.
+   */
+  private getCacheHashKey(): Buffer {
+    if (this.cacheHashKey) return this.cacheHashKey;
+    const key = resolveEnvelopeKey(
+      this.configService.get<string>('LOOKUP_HASH_SECRET') ||
+        this.configService.get<string>('DATA_ENCRYPTION_KEY'),
+    );
+    if (!key) {
+      if (this.configService.get<string>('NODE_ENV') === 'production') {
+        throw new Error('LOOKUP_HASH_SECRET is required');
+      }
+      this.cacheHashKey = crypto
+        .createHash('sha256')
+        .update('checkorder-cache-dev')
+        .digest();
+      return this.cacheHashKey;
+    }
+    this.cacheHashKey = key;
+    return key;
+  }
+
+  private getCacheSealKey(): Buffer | null {
+    if (this.cacheSealKey === undefined) {
+      this.cacheSealKey = resolveEnvelopeKey(
+        this.configService.get<string>('DATA_ENCRYPTION_KEY'),
+      );
+    }
+    return this.cacheSealKey;
+  }
+
+  /** Cached lookups hold customer PII; seal the whole value when a key exists. */
+  private sealCache(value: CachedLookup): CachedLookup | string {
+    const key = this.getCacheSealKey();
+    if (!key) {
+      if (this.configService.get<string>('NODE_ENV') === 'production') {
+        throw new Error('DATA_ENCRYPTION_KEY is required');
+      }
+      return value;
+    }
+    return seal(key, JSON.stringify(value));
+  }
+
+  /** An unreadable sealed entry is a cache miss, never an error. */
+  private openCache(raw: unknown): CachedLookup | null {
+    if (!isSealed(raw)) return (raw as CachedLookup | null) ?? null;
+    const plain = open(this.getCacheSealKey(), raw);
+    if (plain === null) return null;
+    try {
+      return JSON.parse(plain) as CachedLookup;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Caps deep scans per store per minute; each one pages through Haravan. */
+  private async isFallbackBudgetExceeded(storeId: string): Promise<boolean> {
+    if (typeof this.redis.incr !== 'function') return false;
+    const used = await this.redis.incr(
+      `haravan:checkorders:fallback_budget:${storeId}`,
+      60,
+    );
+    return (
+      used >
+      this.getPositiveConfig(
+        'ORDER_LOOKUP_FALLBACK_PER_MIN',
+        DEFAULT_FALLBACK_PER_MIN,
+      )
+    );
   }
 
   private getPositiveConfig(name: string, fallback: number): number {

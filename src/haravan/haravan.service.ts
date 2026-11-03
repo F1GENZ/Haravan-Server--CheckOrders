@@ -4,6 +4,7 @@ import {
   Injectable,
   Inject,
   Logger,
+  ServiceUnavailableException,
   Optional,
   forwardRef,
 } from '@nestjs/common';
@@ -34,6 +35,28 @@ const DEFAULT_PRO_EXPIRES_MS = 10 * 365 * 24 * 60 * 60 * 1000;
 const DEFAULT_TRIAL_MS = 7 * 24 * 60 * 60 * 1000;
 const DEFAULT_TRIAL_QUOTA = 10;
 const SAFE_LOGIN_SCOPE = 'openid profile email org userinfo';
+const SESSION_REVOKED_PREFIX = 'haravan:checkorders:session_revoked_before';
+const WEBHOOK_DEDUPE_PROCESSING_TTL_SECONDS = 120;
+const WEBHOOK_DEDUPE_ORDER_TTL_SECONDS = 7 * 24 * 60 * 60;
+// Order webhooks carry the full order state, so an identical body is a
+// replay. Other topics (uninstall, subscription, shop) keep the short window
+// because an identical body can legitimately recur with a new meaning.
+const ORDER_WEBHOOK_TOPICS: readonly string[] = [
+  'orders/create',
+  'orders/updated',
+  'orders/cancelled',
+  'orders/paid',
+  'orders/delete',
+  'order/create',
+  'order/updated',
+  'order/cancelled',
+  'order/paid',
+  'order/delete',
+];
+const webhookDedupeTtlSeconds = (topic: string): number =>
+  ORDER_WEBHOOK_TOPICS.includes(topic)
+    ? WEBHOOK_DEDUPE_ORDER_TTL_SECONDS
+    : WEBHOOK_DEDUPE_PROCESSING_TTL_SECONDS;
 
 type HaravanConfig = {
   frontEndUrl: string;
@@ -360,12 +383,23 @@ export class HaravanService {
   }
 
   private getSessionSecret(): string {
+    const appSecret = this.config.get<string>('APP_SESSION_SECRET') || '';
+    // Production signs sessions with a dedicated secret only; the Haravan
+    // client secret fallback exists for development.
     const secret =
-      this.config.get<string>('APP_SESSION_SECRET') ||
-      this.config.get<string>('HRV_CLIENT_SECRET') ||
-      '';
+      appSecret ||
+      (this.isProduction()
+        ? ''
+        : this.config.get<string>('HRV_CLIENT_SECRET') || '');
     if (!secret) throw new UnauthorizedException('Session secret missing');
     return secret;
+  }
+
+  private isProduction(): boolean {
+    return (
+      String(this.config.get<string>('NODE_ENV') || '').toLowerCase() ===
+      'production'
+    );
   }
 
   private signSessionPayload(payload: AppSessionPayload): string {
@@ -594,15 +628,45 @@ export class HaravanService {
     return parsed.claims;
   }
 
-  resolveAdminSessionToken(
+  async resolveAdminSessionToken(
     sessionToken: string,
     requestedOrgid: string,
-  ): string {
+  ): Promise<string> {
     const session = this.verifySessionToken(sessionToken);
     if (session.orgid !== requestedOrgid) {
       throw new UnauthorizedException('Orgid does not match auth session');
     }
+    await this.assertSessionNotRevoked(session);
     return session.orgid;
+  }
+
+  private sessionRevokedKey(orgid: string): string {
+    return `${SESSION_REVOKED_PREFIX}:${orgid}`;
+  }
+
+  private async revokeSessionsIssuedBefore(orgid: string): Promise<void> {
+    await this.redisService.set(
+      this.sessionRevokedKey(orgid),
+      Math.floor(Date.now() / 1000),
+      this.sessionTtlSeconds() + 3600,
+    );
+  }
+
+  /**
+   * Rejects sessions minted before the org's uninstall. A session created by
+   * a later install/launch has a newer iat and passes.
+   */
+  async assertSessionNotRevoked(session: AppSessionPayload): Promise<void> {
+    const revokedBefore = Number(
+      await this.redisService.get<number>(this.sessionRevokedKey(session.orgid)),
+    );
+    if (
+      Number.isFinite(revokedBefore) &&
+      revokedBefore > 0 &&
+      (session.iat ?? 0) < revokedBefore
+    ) {
+      throw new UnauthorizedException('Auth session revoked');
+    }
   }
 
   private buildFrontendUrl(
@@ -1056,15 +1120,26 @@ export class HaravanService {
       return { valid: false, reason: 'HMAC mismatch' };
     }
 
-    // Check timestamp freshness (reject if > 5 minutes old)
+    // Reject missing, non-numeric and stale timestamps: a captured launch
+    // URL would otherwise stay valid forever.
     const timestampParam = params.get('timestamp');
-    const timestamp = parseInt(timestampParam || '0', 10);
     const now = Math.floor(Date.now() / 1000);
-    if (timestampParam && Math.abs(now - timestamp) > 300) {
+    if (
+      !timestampParam ||
+      !/^\d+$/.test(timestampParam) ||
+      Math.abs(now - Number(timestampParam)) > 300
+    ) {
       this.logger.warn(
-        `HMAC timestamp expired for orgid/shop: ${params.get('orgid') || params.get('shop') || ''}`,
+        `HMAC timestamp rejected for orgid/shop: ${params.get('orgid') || params.get('shop') || ''}`,
       );
-      return { valid: false, reason: 'Timestamp expired' };
+      return {
+        valid: false,
+        reason: !timestampParam
+          ? 'Timestamp missing'
+          : !/^\d+$/.test(timestampParam)
+            ? 'Timestamp invalid'
+            : 'Timestamp expired',
+      };
     }
 
     const orgid =
@@ -1444,6 +1519,14 @@ export class HaravanService {
         );
       }
       const existingApp = await this.getInstallSession(orgid);
+      if (
+        !existingApp ||
+        String(existingApp.status || '').toLowerCase() === 'uninstalled'
+      ) {
+        // A fresh install must outrank every session from a previous install,
+        // so the marker is written before any session of this install exists.
+        await this.revokeSessionsIssuedBefore(orgid);
+      }
       let shopData: Record<string, unknown> = {};
       try {
         shopData = await this.haravanAPI.getShop(access_token);
@@ -1670,16 +1753,23 @@ export class HaravanService {
   }
 
   verifyWebhookChallenge(query: Record<string, unknown>): string {
-    const token = asString(query['hub.verify_token']);
+    const token = asString(query['hub.verify_token']) || '';
     const challenge = asString(query['hub.challenge']);
     const expected = String(
       this.config.get<string>('HRV_WEBHOOK_SECRET') || '',
     ).trim();
-    if (!expected || token !== expected || !challenge) {
+    if (!expected || !challenge || !this.constantTimeEquals(token, expected)) {
       throw new UnauthorizedException('Invalid webhook challenge');
     }
     return challenge;
   }
+
+  private constantTimeEquals(actual: string, expected: string): boolean {
+    const a = Buffer.from(actual);
+    const b = Buffer.from(expected);
+    return a.length === b.length && crypto.timingSafeEqual(a, b);
+  }
+
   private async invalidateOrderLookupCache(orgid: string): Promise<void> {
     if (!orgid) return;
     try {
@@ -1700,11 +1790,12 @@ export class HaravanService {
     }
   }
 
-  private async isDuplicateWebhookDelivery(
+  private async acquireWebhookDedupe(
     topic: string,
     rawBody: Buffer | undefined,
     body: unknown,
-  ): Promise<boolean> {
+  ): Promise<{ duplicate: boolean; inFlight: boolean; key: string | null }> {
+    const none = { duplicate: false, inFlight: false, key: null };
     try {
       const payloadBuf =
         rawBody && rawBody.length > 0
@@ -1712,13 +1803,48 @@ export class HaravanService {
           : Buffer.from(JSON.stringify(body || {}));
       const hash = crypto.createHash('sha256').update(payloadBuf).digest('hex');
       const dedupeKey = `haravan:checkorders:webhook_dedupe:${topic.toLowerCase().trim()}:${hash}`;
-      if (typeof this.redisService.setNx === 'function') {
-        const acquired = await this.redisService.setNx(dedupeKey, '1', 120);
-        return !acquired;
+      if (typeof this.redisService.setNx !== 'function') return none;
+      const acquired = await this.redisService.setNx(
+        dedupeKey,
+        'processing',
+        WEBHOOK_DEDUPE_PROCESSING_TTL_SECONDS,
+      );
+      if (acquired) return { duplicate: false, inFlight: false, key: dedupeKey };
+      let inFlight = false;
+      try {
+        inFlight =
+          (await this.redisService.get<string>(dedupeKey)) === 'processing';
+      } catch {
+        // Unreadable marker: keep the plain duplicate answer.
       }
-      return false;
+      return { duplicate: true, inFlight, key: null };
     } catch {
-      return false;
+      return none;
+    }
+  }
+
+  private async completeWebhookDedupe(
+    key: string | null,
+    topic: string,
+  ): Promise<void> {
+    if (!key) return;
+    try {
+      await this.redisService.set(key, 'done', webhookDedupeTtlSeconds(topic));
+    } catch (error) {
+      this.logger.warn(
+        `Failed to mark webhook dedupe key done: ${getErrorMessage(error)}`,
+      );
+    }
+  }
+
+  private async releaseWebhookDedupe(key: string | null): Promise<void> {
+    if (!key) return;
+    try {
+      await this.redisService.del(key);
+    } catch (error) {
+      this.logger.warn(
+        `Failed to release webhook dedupe key: ${getErrorMessage(error)}`,
+      );
     }
   }
 
@@ -1732,16 +1858,65 @@ export class HaravanService {
       throw new UnauthorizedException('Invalid webhook hmac');
     }
 
+    this.assertWebhookOrgConsistent(req);
+
     const normalizedTopic = topic.toLowerCase().trim();
-    if (
-      await this.isDuplicateWebhookDelivery(
-        normalizedTopic,
-        req.rawBody,
-        req.body,
-      )
-    ) {
+    const dedupe = await this.acquireWebhookDedupe(
+      normalizedTopic,
+      req.rawBody,
+      req.body,
+    );
+    if (dedupe.inFlight) {
+      // The first delivery has not finished; a 2xx here would make Haravan
+      // drop the event even if that delivery then fails.
+      throw new ServiceUnavailableException('Webhook is still being processed');
+    }
+    if (dedupe.duplicate) {
       return { ok: true, duplicate: true, topic };
     }
+
+    try {
+      const result = await this.dispatchWebhook(req, topic, normalizedTopic);
+      await this.completeWebhookDedupe(dedupe.key, normalizedTopic);
+      return result;
+    } catch (error) {
+      // Release the claim so Haravan's retry is processed instead of skipped.
+      await this.releaseWebhookDedupe(dedupe.key);
+      throw error;
+    }
+  }
+
+  /**
+   * Every explicit org source present on the request must agree. Fallbacks
+   * (shop domain, shop_id) are resolved later and are not compared.
+   */
+  private assertWebhookOrgConsistent(req: RawBodyRequest): void {
+    const body =
+      typeof req.body === 'object' && req.body !== null
+        ? (req.body as Record<string, unknown>)
+        : {};
+    const query = (req.query || {}) as Record<string, unknown>;
+    const values = [
+      this.getHeaderValue(req, ['x-haravan-org-id', 'x-haravan-orgid']),
+      asString(query.orgid),
+      asString(query.org_id),
+      asString(body.orgid),
+      asString(body.org_id),
+      asString(body.organization_id),
+    ]
+      .map((value) => String(value ?? '').trim())
+      .filter(Boolean);
+    if (new Set(values).size > 1) {
+      this.logger.warn('Rejected webhook with conflicting org ids');
+      throw new BadRequestException('Org id mismatch');
+    }
+  }
+
+  private async dispatchWebhook(
+    req: RawBodyRequest,
+    topic: string,
+    normalizedTopic: string,
+  ): Promise<Record<string, unknown>> {
     if (
       ['app/uninstalled', 'app_uninstalled', 'app uninstall'].includes(
         normalizedTopic,
@@ -1801,6 +1976,9 @@ export class HaravanService {
     const orgid = await this.resolveWebhookOrgid(req, body, body);
     if (!orgid) throw new BadRequestException('Missing orgid');
 
+    // Revoke first so a partial failure that Haravan retries still cuts off
+    // sessions issued before the uninstall.
+    await this.revokeSessionsIssuedBefore(orgid);
     await this.db?.clearTokensForUninstall(orgid);
     await this.orderIndexService?.purgeOrg(orgid);
 

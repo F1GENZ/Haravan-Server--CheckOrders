@@ -66,14 +66,17 @@ export class TelegramExceptionFilter implements ExceptionFilter {
       ).toLowerCase() === 'true';
 
     if (status >= 500 || notify4xx) {
-      void this.notificationService.notifyError('HTTP_EXCEPTION', exception, {
-        status,
-        method: req.method,
-        path: req.originalUrl || req.url,
-        orgid: req.orgid || firstHeader(req.headers['x-orgid']),
-        origin: firstHeader(req.headers.origin),
-        referer: firstHeader(req.headers.referer),
-      });
+      // A failing alert channel must never turn a handled error into an unhandled rejection.
+      void this.notificationService
+        .notifyError('HTTP_EXCEPTION', exception, {
+          status,
+          method: req.method,
+          path: (req.originalUrl || req.url).split('?')[0],
+          orgid: req.orgid || firstHeader(req.headers['x-orgid']),
+          origin: firstHeader(req.headers.origin),
+          referer: firstHeader(req.headers.referer)?.split('?')[0],
+        })
+        .catch(() => undefined);
     }
 
     if (res.headersSent) return;

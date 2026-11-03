@@ -7,9 +7,9 @@ export interface RateLimitResult {
   reason?: 'rate_limited' | 'store_rate_limited' | 'ip_blocked';
 }
 
-const IP_MINUTE_PREFIX = 'orlimit:ip';
+const IP_MINUTE_PREFIX = 'orlimit:ipmin';
 const STORE_MINUTE_PREFIX = 'orlimit:store';
-const IP_HOUR_PREFIX = 'orlimit:ip:hour';
+const IP_HOUR_PREFIX = 'orlimit:iphour';
 
 /**
  * RateLimitService
@@ -28,14 +28,13 @@ export class RateLimitService {
   constructor(private readonly redis: RedisService) {}
 
   async check(ip: string, storeId: string): Promise<RateLimitResult> {
-    const ipMinKey = `${IP_MINUTE_PREFIX}:${ip}`;
+    // The store id never contains ':', so the IP (which may be IPv6) is last.
+    const ipMinKey = `${IP_MINUTE_PREFIX}:${storeId}:${ip}`;
+    const ipHourKey = `${IP_HOUR_PREFIX}:${storeId}:${ip}`;
     const storeMinKey = `${STORE_MINUTE_PREFIX}:${storeId}`;
-    const ipHourKey = `${IP_HOUR_PREFIX}:${ip}`;
 
-    // Increment all counters
-    const [ipMinCount, storeMinCount, ipHourCount] = await Promise.all([
+    const [ipMinCount, ipHourCount] = await Promise.all([
       this.increment(ipMinKey, 60),
-      this.increment(storeMinKey, 60),
       this.increment(ipHourKey, 3600),
     ]);
 
@@ -50,6 +49,10 @@ export class RateLimitService {
       this.logger.warn(`IP rate limited (L1): ${ip} — ${ipMinCount} req/min`);
       return { blocked: true, require_captcha: false, reason: 'rate_limited' };
     }
+
+    // Only requests that passed the per-IP limits count against the store, so
+    // one abusive client cannot exhaust the store budget for everyone else.
+    const storeMinCount = await this.increment(storeMinKey, 60);
 
     // L2: Store rate limited (200 req/min)
     if (storeMinCount > 200) {

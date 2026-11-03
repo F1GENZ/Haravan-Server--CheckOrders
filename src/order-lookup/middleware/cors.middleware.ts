@@ -1,5 +1,6 @@
 import { Injectable, NestMiddleware, Logger } from '@nestjs/common';
 import type { Request, Response, NextFunction } from 'express';
+import { resolveTrustedForwardedHost } from '../../common/trusted-hosts';
 import { StoreService } from '../services/store.service';
 
 /**
@@ -111,25 +112,6 @@ export class OrderLookupCorsMiddleware implements NestMiddleware {
   }
 
   private getForwardedHost(req: Request): string | null {
-    return this.normalizeHost(req.headers['x-forwarded-host']);
-  }
-
-  private normalizeHost(value: unknown): string | null {
-    const raw =
-      typeof value === 'string'
-        ? value
-        : Array.isArray(value) && typeof value[0] === 'string'
-          ? value[0]
-          : '';
-    const first = raw.split(',')[0]?.trim();
-    if (!first) return null;
-
-    try {
-      return new URL(
-        /^https?:\/\//i.test(first) ? first : `https://${first}`,
-      ).hostname.toLowerCase();
-    } catch {
-      return first.split(':')[0]?.toLowerCase() || null;
-    }
+    return resolveTrustedForwardedHost(req.headers);
   }
 }

@@ -16,6 +16,11 @@ import Redis from 'ioredis';
           port: config.get<number>('REDIS_PORT'),
           username: config.get<string>('REDIS_USERNAME') || undefined,
           password: config.get<string>('REDIS_PASSWORD') || undefined,
+          tls:
+            String(config.get<string>('REDIS_TLS') || '').toLowerCase() ===
+            'true'
+              ? {}
+              : undefined,
         });
       },
     },
