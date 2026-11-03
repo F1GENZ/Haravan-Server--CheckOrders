@@ -22,6 +22,7 @@ import type { StoreRecord } from '../services/store.service';
 import { LookupRequestDto } from '../dto/lookup-request.dto';
 import type { LookupResponseDto } from '../dto/lookup-response.dto';
 import { resolveTrustedForwardedHost } from '../../common/trusted-hosts';
+import { timingSafeEqual } from 'crypto';
 
 const widgetApiUrl = (): string =>
   (process.env.WIDGET_API_URL || '').replace(/\/+$/, '');
@@ -50,19 +51,36 @@ const normalizeIp = (value: string | null | undefined): string | null => {
   return first.replace(/^::ffff:/, '');
 };
 
+/** True only when the request carries the shared secret the Pages proxy adds; nobody else knows it. */
+const isFromPagesProxy = (req: Request): boolean => {
+  const expected = String(process.env.PAGES_PROXY_SECRET || '').trim();
+  const presented = firstHeaderValue(req.headers['x-pages-proxy-auth']);
+  if (!expected || !presented) return false;
+  const a = Buffer.from(presented.trim());
+  const b = Buffer.from(expected);
+  return a.length === b.length && timingSafeEqual(a, b);
+};
+
 /**
  * `TRUST_PROXY` is empty in production (cloudflared in front, no `X-Forwarded-For` hop to trust), so `req.ip` is
  * the tunnel's loopback address for every shopper and they share one rate-limit bucket. `CF-Connecting-IP`
  * is only trusted when the operator sets `TRUST_CF_CONNECTING_IP=true`, which is correct only when the
- * origin is reachable through the tunnel alone.
+ * origin is reachable through the tunnel alone. Requests relayed by the Pages proxy arrive from a Cloudflare
+ * Worker egress address, so their `CF-Connecting-IP` is that egress IP; the proxy puts the shopper's address in
+ * `X-Forwarded-For`, which is believed only alongside the proxy secret (any Worker can reach this origin).
  */
 const getClientIp = (req: Request): string => {
   const trustCloudflare =
     String(process.env.TRUST_CF_CONNECTING_IP || '').toLowerCase() === 'true';
+  const relayedIp =
+    trustCloudflare && isFromPagesProxy(req)
+      ? normalizeIp(firstHeaderValue(req.headers['x-forwarded-for']))
+      : null;
   const cloudflareIp = trustCloudflare
     ? normalizeIp(firstHeaderValue(req.headers['cf-connecting-ip']))
     : null;
   return (
+    relayedIp ||
     cloudflareIp ||
     normalizeIp(req.ip) ||
     normalizeIp(req.socket.remoteAddress) ||

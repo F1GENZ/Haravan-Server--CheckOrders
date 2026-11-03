@@ -14,9 +14,12 @@ const lookupFrom = async (headers: Record<string, string>) => {
 
 describe('LookupController client ip', () => {
   const original = process.env.TRUST_CF_CONNECTING_IP;
+  const originalSecret = process.env.PAGES_PROXY_SECRET;
   afterEach(() => {
     if (original === undefined) delete process.env.TRUST_CF_CONNECTING_IP;
     else process.env.TRUST_CF_CONNECTING_IP = original;
+    if (originalSecret === undefined) delete process.env.PAGES_PROXY_SECRET;
+    else process.env.PAGES_PROXY_SECRET = originalSecret;
   });
 
   it('ignores CF-Connecting-IP by default, so a caller cannot pick its own rate-limit bucket', async () => {
@@ -28,5 +31,23 @@ describe('LookupController client ip', () => {
     process.env.TRUST_CF_CONNECTING_IP = 'true';
     expect(await lookupFrom({ 'cf-connecting-ip': '203.0.113.9' })).toBe('203.0.113.9');
     expect(await lookupFrom({})).toBe('::1');
+  });
+
+  it('uses the shopper address the Pages proxy forwards only when the proxy secret matches', async () => {
+    process.env.TRUST_CF_CONNECTING_IP = 'true';
+    process.env.PAGES_PROXY_SECRET = 'proxy-secret-for-tests';
+    const relayed = { 'cf-connecting-ip': '2a06:98c0:3600::103', 'x-forwarded-for': '198.51.100.7' };
+    expect(await lookupFrom({ ...relayed, 'x-pages-proxy-auth': 'proxy-secret-for-tests' })).toBe('198.51.100.7');
+    expect(await lookupFrom({ ...relayed, 'x-pages-proxy-auth': 'proxy-secret-for-test' })).toBe('2a06:98c0:3600::103');
+    expect(await lookupFrom(relayed)).toBe('2a06:98c0:3600::103');
+  });
+
+  it('ignores the proxy header when no secret is configured or Cloudflare is not trusted', async () => {
+    delete process.env.PAGES_PROXY_SECRET;
+    process.env.TRUST_CF_CONNECTING_IP = 'true';
+    expect(await lookupFrom({ 'cf-connecting-ip': '203.0.113.9', 'x-forwarded-for': '198.51.100.7', 'x-pages-proxy-auth': '' })).toBe('203.0.113.9');
+    process.env.PAGES_PROXY_SECRET = 'proxy-secret-for-tests';
+    delete process.env.TRUST_CF_CONNECTING_IP;
+    expect(await lookupFrom({ 'x-forwarded-for': '198.51.100.7', 'x-pages-proxy-auth': 'proxy-secret-for-tests' })).toBe('::1');
   });
 });

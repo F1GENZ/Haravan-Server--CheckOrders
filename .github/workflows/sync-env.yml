@@ -36,6 +36,7 @@ jobs:
           V_DIRECT_URL: ${{ secrets.ENV_DIRECT_URL }}
           V_TELEGRAM_BOT_TOKEN: ${{ secrets.ENV_TELEGRAM_BOT_TOKEN }}
           V_TRUST_CF_CONNECTING_IP: ${{ secrets.ENV_TRUST_CF_CONNECTING_IP }}
+          V_PAGES_PROXY_SECRET: ${{ secrets.ENV_PAGES_PROXY_SECRET }}
         run: |
           set -euo pipefail
           payload=""
@@ -43,7 +44,7 @@ jobs:
           for key in "${requested[@]}"; do
             key="$(echo "$key" | tr -d '[:space:]')"
             case "$key" in
-              APP_SESSION_SECRET|HRV_CLIENT_SECRET|HRV_WEBHOOK_SECRET|REDIS_PASSWORD|REDIS_TLS|DATABASE_URL|DIRECT_URL|TELEGRAM_BOT_TOKEN|TRUST_CF_CONNECTING_IP) ;;
+              APP_SESSION_SECRET|HRV_CLIENT_SECRET|HRV_WEBHOOK_SECRET|REDIS_PASSWORD|REDIS_TLS|DATABASE_URL|DIRECT_URL|TELEGRAM_BOT_TOKEN|TRUST_CF_CONNECTING_IP|PAGES_PROXY_SECRET) ;;
               *) echo "Unsupported key: $key" >&2; exit 1 ;;
             esac
             var="V_$key"
