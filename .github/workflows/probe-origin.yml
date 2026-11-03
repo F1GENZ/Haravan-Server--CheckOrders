@@ -1,0 +1,21 @@
+name: Probe origin exposure
+
+on:
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: webfactory/ssh-agent@v0.7.0
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+      - name: Postgres port 5432
+        env:
+          VPS_TARGET: ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+        run: |
+          set -uo pipefail
+          ssh -o StrictHostKeyChecking=no "$VPS_TARGET" "ss -ltn | awk 'NR==1 || /:5432 /'; echo '--- process'; sudo -n ss -ltnp 2>/dev/null | grep ':5432 ' | grep -o 'users:((\"[a-z0-9_-]*' || echo 'process: not readable'; echo '--- services'; systemctl list-units --type=service --state=running 2>/dev/null | grep -iE 'postgres|supabase|pgbouncer' || echo 'no postgres service'; (command -v docker >/dev/null && docker ps --format '{{.Names}} {{.Image}} {{.Ports}}' 2>/dev/null | grep -E '5432' ) || echo 'no docker container on 5432'"
+          if timeout 6 bash -c "</dev/tcp/$VPS_HOST/5432" 2>/dev/null; then echo "public tcp 5432: OPEN"; else echo "public tcp 5432: closed or filtered"; fi
