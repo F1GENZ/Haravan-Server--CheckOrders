@@ -25,3 +25,10 @@ jobs:
           for p in "$port" 80 443; do
             if curl -sS -m 8 -o /dev/null -w "public tcp $p -> http %{http_code}\n" "http://$VPS_HOST:$p/api/health"; then :; else echo "public tcp $p -> unreachable"; fi
           done
+          for h in api-checkorders.f1genz.dev checkorders.f1genz.dev; do
+            curl -sS -m 8 -o /tmp/b -w "nginx http  Host=$h -> %{http_code}\n" -H "Host: $h" "http://$VPS_HOST/api/health" || echo "nginx http Host=$h -> error"
+            grep -o '"app":"[^"]*"' /tmp/b || true
+            curl -sSk -m 8 -o /tmp/b -w "nginx https Host=$h -> %{http_code}\n" --resolve "$h:443:$VPS_HOST" "https://$h/api/health" || echo "nginx https Host=$h -> error"
+            grep -o '"app":"[^"]*"' /tmp/b || true
+          done
+          ssh -o StrictHostKeyChecking=no "$VPS_TARGET" "grep -rlE ':$port|127.0.0.1:$port|localhost:$port' /etc/nginx/sites-enabled /etc/nginx/conf.d 2>/dev/null || echo 'no nginx site proxies the app port'; (command -v cloudflared >/dev/null && echo cloudflared-installed) || true"
