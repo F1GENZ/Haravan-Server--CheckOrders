@@ -1,0 +1,41 @@
+name: Export production env (encrypted)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: webfactory/ssh-agent@v0.7.0
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+      - name: Encrypt the VPS .env for the operator key
+        env:
+          VPS_TARGET: ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}
+          APP_DIR: ${{ secrets.APP_DIR }}
+        run: |
+          set -euo pipefail
+          umask 077
+          cat > pub.pem <<'PEM'
+          -----BEGIN PUBLIC KEY-----
+          MIIBojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEArLsf2O5guXOOJ77Ilo6Z
+          DIqooB2CCgoTGdtUgFPFuzqA3lQNihMi3qW/PRTaNGnuXtQK84SoZixiqxMHvuou
+          OymbK2BMCCooWigbwbm7R61auEnXuB1CSuROrMyA22W5OXCuQhS8U7ylpILn1MHb
+          Aqu3YdU/jdNfA7azf5t/PKkZnLMUo+PXBEs/AgqUYawxlpzXKKgA3D+r2QQdEkFg
+          WGit2Dnqci6APwTv+BckNoD0drUEfUfHrhfxGxZHFGWwhK7f1JHeNVWVHDUBwLxp
+          +b+Zx7wUcAlIcAv5NJGcD6xp+D4MiTKifjz72j7gOwBuMWdpDiJbz9TbpDf91g/t
+          TKFexJi6Z7V1jsGOYiHc0UkbAVDVR3qRplaR/Je68EUY6vNI5u2aGVtIotg151hW
+          sJ36d8Bw3C0JN7PqxaAkT/9ZN/I9bHX2VqngreZB6rOij3Lu8ksFKiyxngVVBbHA
+          UYHlx97dDSEzsBtZq1wwqbkqVYSKVmQLJ0DvjfiyqtBLAgMBAAE=
+          -----END PUBLIC KEY-----
+          PEM
+          sed -i 's/^ *//' pub.pem
+          KEY=$(openssl rand -hex 32)
+          IV=$(openssl rand -hex 16)
+          printf '%s%s' "$KEY" "$IV" | xxd -r -p > k.bin
+          echo "WRAPPED=$(openssl pkeyutl -encrypt -pubin -inkey pub.pem -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -in k.bin | base64 -w0)"
+          ssh -o StrictHostKeyChecking=no "$VPS_TARGET" "cat \"$APP_DIR/.env\"" | openssl enc -aes-256-cbc -K "$KEY" -iv "$IV" | base64 -w0 | sed 's/^/PAYLOAD=/'
+          echo
+          rm -f k.bin pub.pem
