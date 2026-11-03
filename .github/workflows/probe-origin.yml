@@ -1,0 +1,27 @@
+name: Probe origin exposure
+
+on:
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: webfactory/ssh-agent@v0.7.0
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+      - name: Listening sockets and public reachability
+        env:
+          VPS_TARGET: ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          APP_DIR: ${{ secrets.APP_DIR }}
+        run: |
+          set -uo pipefail
+          port=$(ssh -o StrictHostKeyChecking=no "$VPS_TARGET" "grep '^PORT=' '$APP_DIR/.env' | tail -n 1 | cut -d '=' -f2 | tr -d '\r\"'")
+          port=${port:-3333}
+          echo "app port: $port"
+          ssh -o StrictHostKeyChecking=no "$VPS_TARGET" "ss -ltn | awk 'NR==1 || /:$port /'; (command -v ufw >/dev/null && sudo -n ufw status 2>/dev/null | head -20) || echo 'ufw: not readable'"
+          for p in "$port" 80 443; do
+            if curl -sS -m 8 -o /dev/null -w "public tcp $p -> http %{http_code}\n" "http://$VPS_HOST:$p/api/health"; then :; else echo "public tcp $p -> unreachable"; fi
+          done
