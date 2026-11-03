@@ -5,8 +5,10 @@ import {
   OnModuleInit,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { PrismaPg } from '@prisma/adapter-pg';
 import { Prisma, PrismaClient } from '@prisma/client';
 import * as crypto from 'crypto';
+import { buildPgAdapterConfig } from './pg-adapter-config';
 import type {
   StoreRecord,
   StoreSettings,
@@ -102,9 +104,7 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
       this.config.get<string>('DATABASE_URL') || '',
     ).trim();
     this.enabled = Boolean(databaseUrl);
-    this.prisma = this.enabled
-      ? new PrismaClient({ datasources: { db: { url: databaseUrl } } })
-      : null;
+    this.prisma = this.enabled ? this.createClient(databaseUrl) : null;
     this.encryptionKey = this.resolveEncryptionKey();
     if (this.enabled && !this.encryptionKey) {
       throw new Error(
@@ -141,6 +141,18 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
 
   get client(): PrismaClient | null {
     return this.prisma;
+  }
+
+  private createClient(databaseUrl: string): PrismaClient {
+    const { poolConfig, schema } = buildPgAdapterConfig(databaseUrl);
+    const adapter = new PrismaPg(poolConfig, {
+      schema,
+      onPoolError: (error) =>
+        this.logger.warn(
+          `Database idle connection error: ${this.getErrorMessage(error)}`,
+        ),
+    });
+    return new PrismaClient({ adapter });
   }
 
   private resolveEncryptionKey(): Buffer | null {

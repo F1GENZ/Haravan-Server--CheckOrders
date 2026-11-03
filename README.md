@@ -5,7 +5,7 @@
 - Chạy `npm run build` trước khi deploy.
 - Bắt buộc có Redis production và bật persistence hoặc backup ở tầng hạ tầng.
 - Dùng PostgreSQL + Prisma cho dữ liệu bền vững: `Shop`, `AppInstall`, `ShopSettings`, `SubscriptionSnapshot`, `WebhookEvent`, `LookupEvent`.
-- Cấu hình `DATABASE_URL` (kết nối runtime của ứng dụng) và `DIRECT_URL` (kết nối trực tiếp cho `prisma migrate deploy`).
+- Cấu hình `DATABASE_URL` (kết nối runtime của ứng dụng) và `DIRECT_URL` (kết nối trực tiếp cho `prisma migrate deploy`). Prisma 7: `prisma.config.ts` đọc `DIRECT_URL` (nếu trống thì dùng `DATABASE_URL`) cho CLI; runtime dùng driver adapter `pg`, tự bỏ các tham số riêng của Prisma (`pgbouncer`, `schema`, `connection_limit`, `connect_timeout`, `sslmode`…). Host không phải loopback mặc định dùng TLS không xác thực chuỗi chứng chỉ (như Prisma 6); thêm `sslmode=verify-full` để xác thực hoặc `sslmode=disable` cho Postgres không có TLS.
 - Cấu hình `DATA_ENCRYPTION_KEY` (32 bytes AES-256-GCM để mã hóa OAuth token trong DB) và `LOOKUP_HASH_SECRET` (HMAC audit log).
 - Cấu hình đúng `FRONTEND_URL`, `API_BASE_URL`, `WIDGET_API_URL`, `WIDGET_PUBLIC_URL`, `CORS_ALLOWED_ORIGINS`.
 - Cấu hình đúng Haravan OAuth: authorize URL, token URL, client id, client secret, login callback, install callback.

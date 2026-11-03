@@ -49,6 +49,7 @@ jobs:
           ssh -o StrictHostKeyChecking=no ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} << 'EOF'
             set -euo pipefail
             cd ${{ secrets.APP_DIR }}
+            node -e 'const [major, minor] = process.versions.node.split(".").map(Number); console.log("node " + process.version); if (major < 20 || (major === 20 && minor < 19) || major === 21) { console.error("Prisma 7 needs Node 20.19+ or 22+"); process.exit(1); }'
             git fetch origin main
             git checkout main
             git pull --ff-only origin main
