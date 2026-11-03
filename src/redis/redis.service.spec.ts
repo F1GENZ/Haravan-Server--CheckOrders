@@ -5,7 +5,7 @@ import {
   resolveEnvelopeKey,
   seal,
 } from '../common/secret-envelope';
-import { RedisService, SEAL_REDIS_TOKENS_ON_WRITE } from './redis.service';
+import { RedisService } from './redis.service';
 
 const RAW_KEY =
   '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
@@ -25,12 +25,9 @@ const config = (value?: string): ConfigService =>
     get: (name: string) => (name === 'DATA_ENCRYPTION_KEY' ? value : undefined),
   }) as unknown as ConfigService;
 
-const build = (rawKey: string | undefined, sealOnWrite?: boolean) => {
+const build = (rawKey: string | undefined) => {
   const client = new FakeClient();
   const service = new RedisService(client as unknown as Redis, config(rawKey));
-  if (sealOnWrite !== undefined) {
-    (service as unknown as { sealOnWrite: boolean }).sealOnWrite = sealOnWrite;
-  }
   return { client, service };
 };
 
@@ -139,12 +136,8 @@ describe('RedisService token reader', () => {
 });
 
 describe('RedisService token writer', () => {
-  it('ships with the token writer switched off', () => {
-    expect(SEAL_REDIS_TOKENS_ON_WRITE).toBe(false);
-  });
-
-  it('seals both token fields when sealing is switched on', async () => {
-    const { client, service } = build(RAW_KEY, true);
+  it('seals both token fields when a key is configured', async () => {
+    const { client, service } = build(RAW_KEY);
     await service.set(
       'k',
       {
@@ -169,7 +162,7 @@ describe('RedisService token writer', () => {
   });
 
   it('does not touch empty, non-string or already sealed tokens', async () => {
-    const { client, service } = build(RAW_KEY, true);
+    const { client, service } = build(RAW_KEY);
     const already = seal(KEY, 'sealed-before');
     await service.set('k', {
       access_token: '',
@@ -188,7 +181,7 @@ describe('RedisService token writer', () => {
   });
 
   it('writes plaintext when no key is configured', async () => {
-    const { client, service } = build(undefined, true);
+    const { client, service } = build(undefined);
     await service.set('k', { access_token: 'plain' });
     expect(JSON.parse(client.data.get('k')!)).toEqual({
       access_token: 'plain',
@@ -196,7 +189,7 @@ describe('RedisService token writer', () => {
   });
 
   it('does not mutate the caller object', async () => {
-    const { service } = build(RAW_KEY, true);
+    const { service } = build(RAW_KEY);
     const record = {
       access_token: 'real-access',
       refresh_token: 'real-refresh',
@@ -209,7 +202,7 @@ describe('RedisService token writer', () => {
   });
 
   it('migrates a plaintext record to ciphertext on the next write', async () => {
-    const { client, service } = build(RAW_KEY, true);
+    const { client, service } = build(RAW_KEY);
     client.data.set(
       'k',
       JSON.stringify({ access_token: 'plain-a', refresh_token: 'plain-r' }),
@@ -226,22 +219,5 @@ describe('RedisService token writer', () => {
       refresh_token: 'plain-r',
       status: 'active',
     });
-  });
-
-  it('writes plaintext when sealing is explicitly switched off', async () => {
-    const { client, service } = build(RAW_KEY, false);
-    await service.set('k', { access_token: 'plain' });
-    expect(JSON.parse(client.data.get('k')!)).toEqual({
-      access_token: 'plain',
-    });
-  });
-
-  it('seals through the default switch exactly when the constant is on', async () => {
-    const { client, service } = build(RAW_KEY);
-    await service.set('k', { access_token: 'plain' });
-    const stored = JSON.parse(client.data.get('k')!) as Record<string, string>;
-    expect(stored.access_token.startsWith(ENVELOPE_PREFIX)).toBe(
-      SEAL_REDIS_TOKENS_ON_WRITE,
-    );
   });
 });

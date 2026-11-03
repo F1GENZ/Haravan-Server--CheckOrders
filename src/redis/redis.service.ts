@@ -14,13 +14,6 @@ import {
   seal,
 } from '../common/secret-envelope';
 
-/**
- * Writer switch for Haravan token sealing. The reader accepts both plaintext
- * and sealed records regardless; the writer is enabled only after the reader
- * is live everywhere, so a rollback never meets ciphertext it cannot read.
- */
-export const SEAL_REDIS_TOKENS_ON_WRITE = false;
-
 const TOKEN_FIELDS = ['access_token', 'refresh_token'] as const;
 
 const isPlainObject = (value: unknown): value is Record<string, unknown> =>
@@ -30,7 +23,6 @@ const isPlainObject = (value: unknown): value is Record<string, unknown> =>
 export class RedisService implements OnModuleDestroy {
   private readonly logger = new Logger(RedisService.name);
   private readonly tokenKey: Buffer | null;
-  protected sealOnWrite: boolean = SEAL_REDIS_TOKENS_ON_WRITE;
 
   constructor(
     @Inject('REDIS_CLIENT') private readonly client: Redis,
@@ -64,7 +56,7 @@ export class RedisService implements OnModuleDestroy {
 
   /** Writes plaintext when no key is configured; never mutates the caller's object. */
   private sealTokenFields(value: unknown): unknown {
-    if (!this.sealOnWrite || !this.tokenKey || !isPlainObject(value)) {
+    if (!this.tokenKey || !isPlainObject(value)) {
       return value;
     }
     const copy: Record<string, unknown> = { ...value };
