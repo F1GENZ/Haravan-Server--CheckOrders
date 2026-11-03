@@ -27,6 +27,9 @@ jobs:
       - run: npm run build
 
   deploy:
+    concurrency:
+      group: production-vps
+      cancel-in-progress: false
     name: Deploy via SSH
     needs: test
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'

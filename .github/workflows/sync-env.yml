@@ -1,0 +1,80 @@
+name: Sync production env
+
+on:
+  workflow_dispatch:
+    inputs:
+      keys:
+        description: Comma-separated .env keys to write from the ENV_<KEY> repository secrets
+        required: true
+
+concurrency:
+  group: production-vps
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Write .env and restart
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 🔐 Setup SSH connection
+        uses: webfactory/ssh-agent@v0.7.0
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+      - name: Write keys and restart
+        env:
+          KEYS: ${{ inputs.keys }}
+          VPS_TARGET: ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}
+          APP_DIR: ${{ secrets.APP_DIR }}
+          V_APP_SESSION_SECRET: ${{ secrets.ENV_APP_SESSION_SECRET }}
+          V_HRV_CLIENT_SECRET: ${{ secrets.ENV_HRV_CLIENT_SECRET }}
+          V_HRV_WEBHOOK_SECRET: ${{ secrets.ENV_HRV_WEBHOOK_SECRET }}
+          V_REDIS_PASSWORD: ${{ secrets.ENV_REDIS_PASSWORD }}
+          V_REDIS_TLS: ${{ secrets.ENV_REDIS_TLS }}
+          V_DATABASE_URL: ${{ secrets.ENV_DATABASE_URL }}
+          V_DIRECT_URL: ${{ secrets.ENV_DIRECT_URL }}
+          V_TELEGRAM_BOT_TOKEN: ${{ secrets.ENV_TELEGRAM_BOT_TOKEN }}
+          V_TRUST_CF_CONNECTING_IP: ${{ secrets.ENV_TRUST_CF_CONNECTING_IP }}
+        run: |
+          set -euo pipefail
+          payload=""
+          IFS=',' read -ra requested <<< "$KEYS"
+          for key in "${requested[@]}"; do
+            key="$(echo "$key" | tr -d '[:space:]')"
+            case "$key" in
+              APP_SESSION_SECRET|HRV_CLIENT_SECRET|HRV_WEBHOOK_SECRET|REDIS_PASSWORD|REDIS_TLS|DATABASE_URL|DIRECT_URL|TELEGRAM_BOT_TOKEN|TRUST_CF_CONNECTING_IP) ;;
+              *) echo "Unsupported key: $key" >&2; exit 1 ;;
+            esac
+            var="V_$key"
+            value="${!var:-}"
+            if [ -z "$value" ]; then echo "Secret ENV_$key is empty" >&2; exit 1; fi
+            if [ "$key" = TELEGRAM_BOT_TOKEN ]; then
+              curl -fsS "https://api.telegram.org/bot${value}/getMe" | grep -q '"ok":true' || { echo "Telegram rejected the new bot token" >&2; exit 1; }
+            fi
+            payload+="${key}=${value}"$'\n'
+          done
+
+          remote=$(cat <<'SCRIPT'
+          set -euo pipefail
+          cd "$1"
+          stamp=$(date +%s)
+          cp .env ".env.bak-$stamp"
+          chmod 600 ".env.bak-$stamp"
+          node scripts/merge-env.js
+          pm2 restart haravan-checkorders --update-env
+          pm2 save
+          APP_PORT=$(grep '^PORT=' .env | tail -n 1 | cut -d '=' -f2 | tr -d '\r"')
+          if [ -z "$APP_PORT" ]; then APP_PORT=3333; fi
+          for i in $(seq 1 30); do
+            if curl -fsS "http://127.0.0.1:${APP_PORT}/api/health" >/tmp/checkorders-health.json && grep -q '"ok":true' /tmp/checkorders-health.json; then
+              cat /tmp/checkorders-health.json
+              exit 0
+            fi
+            sleep 2
+          done
+          cat /tmp/checkorders-health.json || true
+          exit 1
+          SCRIPT
+          )
+          printf '%s' "$payload" | ssh -o StrictHostKeyChecking=no "$VPS_TARGET" "bash -c $(printf '%q' "$remote") _ $(printf '%q' "$APP_DIR")"
