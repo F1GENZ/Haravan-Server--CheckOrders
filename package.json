@@ -22,6 +22,9 @@
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
     "verify": "npm run build && jest --runInBand src/app.boot.spec.ts"
   },
+  "overrides": {
+    "multer": "^2.5.0"
+  },
   "dependencies": {
     "@nestjs/common": "^11.0.1",
     "@nestjs/config": "^4.0.3",
